@@ -573,7 +573,7 @@ namespace xcas {
 #endif
   
 #define is_wchar(c) ((c == 0x7F) || (c == 0xF7) || (c == 0xF9) || (c == 0xE5) || (c == 0xE6) || (c == 0xE7))
-#ifndef HP39
+#if !defined(HP39) && !defined(ESP_PLATFORM)
 #define printf(s) Console_Output((const char *)s);
 #endif
 
