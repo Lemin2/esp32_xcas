@@ -24,12 +24,22 @@ public:
     void writeMidi(const uint8_t *data, std::size_t len);
     int readMidiByte(uint8_t *byte, TickType_t timeout);
 
+    // Screenshot support (debug aid). Call beginScreenshotCapture() to allocate
+    // a full-frame shadow buffer, force a full LVGL redraw, then emitScreenshot()
+    // to stream it over the serial console as base64 RGB565, then
+    // endScreenshotCapture() to release the buffer. Safe to call from the UI task.
+    bool beginScreenshotCapture();
+    void emitScreenshot();
+    void endScreenshotCapture();
+
 private:
     static bool onColorTransferDone(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx);
     void setKeyboardRow(uint8_t row);
+    void stashScreenshotRegion(int x1, int y1, int x2, int y2, const uint16_t *pixels);
 
     esp_lcd_panel_handle_t panel_ = nullptr;
     SemaphoreHandle_t lcd_flush_done_ = nullptr;
+    uint16_t *screenshot_buf_ = nullptr;
 };
 
 } // namespace board

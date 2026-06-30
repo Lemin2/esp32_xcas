@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "apps": [
+    {
+      "id": "cas.calc",
+      "name": "Calculator",
+      "entry": "brookesia::CalcApp",
+      "route": "Calc",
+      "enabled": true
+    },
+    {
+      "id": "cas.graph",
+      "name": "Graph",
+      "entry": "TBD",
+      "route": "Graph",
+      "enabled": false
+    },
+    {
+      "id": "sys.files",
+      "name": "Files",
+      "entry": "TBD",
+      "route": "Files",
+      "enabled": false
+    },
+    {
+      "id": "sys.project",
+      "name": "Project",
+      "entry": "TBD",
+      "route": "Project",
+      "enabled": false
+    },
+    {
+      "id": "sys.settings",
+      "name": "Settings",
+      "entry": "TBD",
+      "route": "Settings",
+      "enabled": false
+    }
+  ]
+}

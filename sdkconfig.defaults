@@ -23,3 +23,7 @@ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
 # giac (xcas) image is ~10MB; requires 16MB flash
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+
+# LVGL observer/data-binding is enabled by component defaults. Turn on object
+# property interface explicitly so UI can use property-based updates.
+CONFIG_LV_USE_OBJ_PROPERTY=y

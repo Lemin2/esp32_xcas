@@ -77,13 +77,6 @@ namespace xcas
             },
         };
 
-        constexpr const char *kMenus[] = {
-            "CALC",
-            "GRAPH",
-            "SOLVER",
-            "SYSTEM",
-        };
-
         constexpr lv_color_t kBgColor = LV_COLOR_MAKE(245, 245, 238);
         constexpr lv_color_t kPanelColor = LV_COLOR_MAKE(255, 255, 255);
         constexpr lv_color_t kTextColor = LV_COLOR_MAKE(16, 24, 36);
@@ -96,18 +89,22 @@ namespace xcas
         : board_(board),
           service_(service),
           lv_display_(nullptr),
-          menu_label_(nullptr),
+          header_label_(nullptr),
           status_label_(nullptr),
+          info_label_(nullptr),
           history_panel_(nullptr),
-          history_label_(nullptr),
+          history_list_(nullptr),
           input_box_(nullptr),
+          root_(nullptr),
+          selected_history_index_(-1),
+          history_cursor_(-1),
           previous_key_mask_(0),
           last_render_us_(0),
-          menu_index_(0),
           lvgl_initialized_(false),
           redraw_recovery_pending_(false),
           fn_toggled_(false),
-          caps_toggled_(false)
+          caps_toggled_(false),
+          subjects_initialized_(false)
     {
     }
 
@@ -178,6 +175,27 @@ namespace xcas
         lv_display_flush_ready(disp);
     }
 
+    void XcasUi::onHistoryRowEvent(lv_event_t *e)
+    {
+        if (e == nullptr) {
+            return;
+        }
+
+        auto *self = static_cast<XcasUi *>(lv_event_get_user_data(e));
+        if (self == nullptr) {
+            return;
+        }
+
+        lv_obj_t *row = static_cast<lv_obj_t *>(lv_event_get_target(e));
+        if (row == nullptr) {
+            return;
+        }
+
+        const intptr_t idx_tag = reinterpret_cast<intptr_t>(lv_obj_get_user_data(row));
+        const int index = static_cast<int>(idx_tag);
+        self->selectHistoryIndex(index, false);
+    }
+
     void XcasUi::initializeLvgl()
     {
         if (lvgl_initialized_)
@@ -205,42 +223,85 @@ namespace xcas
 
     void XcasUi::buildLayout()
     {
+        const lv_coord_t screen_w = static_cast<lv_coord_t>(board::CardputerBsp::kDisplayWidth);
+        const lv_coord_t screen_h = static_cast<lv_coord_t>(board::CardputerBsp::kDisplayHeight);
+        const lv_coord_t top_reserved = 16; // global status bar space managed by kernel
+
         lv_obj_t *screen = lv_scr_act();
         lv_obj_set_style_bg_color(screen, kBgColor, LV_PART_MAIN);
         lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(screen, 0, LV_PART_MAIN);
 
-        lv_obj_t *title = lv_label_create(screen);
-        lv_label_set_text(title, "XCAS");
-        lv_obj_set_style_text_color(title, kTextColor, LV_PART_MAIN);
-        lv_obj_set_style_text_font(title, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_align(title, LV_ALIGN_TOP_LEFT, 6, 4);
+        lv_obj_t *root = lv_obj_create(screen);
+        lv_obj_remove_style_all(root);
+        lv_obj_set_size(root, screen_w, screen_h - top_reserved);
+        lv_obj_align(root, LV_ALIGN_TOP_LEFT, 0, top_reserved);
+        lv_obj_set_flex_flow(root, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_pad_left(root, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(root, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(root, 2, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(root, 2, LV_PART_MAIN);
+        lv_obj_set_style_pad_row(root, 3, LV_PART_MAIN);
 
-        menu_label_ = lv_label_create(screen);
-        lv_obj_set_style_text_color(menu_label_, kAccentColor, LV_PART_MAIN);
-        lv_obj_set_style_text_font(menu_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_align(menu_label_, LV_ALIGN_TOP_RIGHT, -6, 6);
-        switchMenu(0);
+        header_label_ = lv_label_create(root);
+        lv_obj_set_style_text_color(header_label_, kAccentColor, LV_PART_MAIN);
+        lv_obj_set_style_text_font(header_label_, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_set_width(header_label_, lv_pct(100));
+        lv_label_set_long_mode(header_label_, LV_LABEL_LONG_DOT);
+        if (!subjects_initialized_) {
+            lv_subject_init_string(&header_subject_, header_text_buf_.data(), header_text_prev_buf_.data(), header_text_buf_.size(), "");
+            lv_subject_init_int(&busy_subject_, 0);
+            subjects_initialized_ = true;
+        }
+        lv_label_bind_text(header_label_, &header_subject_, "%s");
+        updateHeaderText();
 
-        history_panel_ = lv_obj_create(screen);
-        lv_obj_set_size(history_panel_, board::CardputerBsp::kDisplayWidth - 10, 82);
-        lv_obj_align(history_panel_, LV_ALIGN_TOP_MID, 0, 24);
+        history_panel_ = lv_obj_create(root);
+    #if LV_USE_OBJ_PROPERTY
+        const lv_property_t history_props[] = {
+            { .id = LV_PROPERTY_OBJ_W, .num = screen_w - 8 },
+        };
+        lv_obj_set_properties(history_panel_, history_props, sizeof(history_props) / sizeof(history_props[0]));
+    #else
+        lv_obj_set_width(history_panel_, screen_w - 8);
+    #endif
+        lv_obj_set_flex_grow(history_panel_, 1);
+        lv_obj_set_style_min_height(history_panel_, 40, LV_PART_MAIN);
         lv_obj_set_style_radius(history_panel_, 6, LV_PART_MAIN);
         lv_obj_set_style_bg_color(history_panel_, kPanelColor, LV_PART_MAIN);
         lv_obj_set_style_border_color(history_panel_, LV_COLOR_MAKE(208, 214, 224), LV_PART_MAIN);
         lv_obj_set_style_border_width(history_panel_, 1, LV_PART_MAIN);
         lv_obj_set_style_pad_all(history_panel_, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_row(history_panel_, 2, LV_PART_MAIN);
         lv_obj_set_scrollbar_mode(history_panel_, LV_SCROLLBAR_MODE_AUTO);
+        lv_obj_set_flex_flow(history_panel_, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(history_panel_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
-        history_label_ = lv_label_create(history_panel_);
-        lv_obj_set_width(history_label_, lv_pct(100));
-        lv_label_set_long_mode(history_label_, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_color(history_label_, kTextColor, LV_PART_MAIN);
-        lv_obj_set_style_text_font(history_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_label_set_text(history_label_, "NumWorks-style UI ready.\nType expression then press Enter.");
+        history_list_ = lv_obj_create(history_panel_);
+        lv_obj_set_width(history_list_, lv_pct(100));
+        lv_obj_set_height(history_list_, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(history_list_, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(history_list_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_bg_opa(history_list_, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_border_width(history_list_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(history_list_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_row(history_list_, 1, LV_PART_MAIN);
+        lv_obj_set_scrollbar_mode(history_list_, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_clear_flag(history_list_, LV_OBJ_FLAG_SCROLLABLE);
 
-        input_box_ = lv_textarea_create(screen);
-        lv_obj_set_size(input_box_, board::CardputerBsp::kDisplayWidth - 10, 22);
-        lv_obj_align(input_box_, LV_ALIGN_TOP_MID, 0, 110);
+        info_label_ = nullptr;
+
+        input_box_ = lv_textarea_create(root);
+    #if LV_USE_OBJ_PROPERTY
+        const lv_property_t input_props[] = {
+            { .id = LV_PROPERTY_OBJ_W, .num = screen_w - 8 },
+            { .id = LV_PROPERTY_OBJ_H, .num = 30 },
+        };
+        lv_obj_set_properties(input_box_, input_props, sizeof(input_props) / sizeof(input_props[0]));
+    #else
+        lv_obj_set_size(input_box_, screen_w - 8, 30);
+    #endif
         lv_textarea_set_one_line(input_box_, true);
         lv_textarea_set_placeholder_text(input_box_, "1+1");
         lv_obj_set_style_bg_color(input_box_, kPanelColor, LV_PART_MAIN);
@@ -250,32 +311,78 @@ namespace xcas
         lv_obj_set_style_border_width(input_box_, 1, LV_PART_MAIN);
         lv_obj_set_style_pad_left(input_box_, 4, LV_PART_MAIN);
         lv_obj_set_style_pad_right(input_box_, 4, LV_PART_MAIN);
-        lv_obj_set_style_text_color(input_box_, kStatusColor, LV_PART_CURSOR | LV_STATE_DEFAULT);
+        lv_obj_set_style_pad_top(input_box_, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(input_box_, 4, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(input_box_, kAccentColor, LV_PART_CURSOR | LV_STATE_DEFAULT);
+        lv_obj_set_style_bg_opa(input_box_, LV_OPA_COVER, LV_PART_CURSOR | LV_STATE_DEFAULT);
         lv_obj_set_style_text_font(input_box_, &lv_font_montserrat_14, LV_PART_MAIN);
+        lv_obj_add_state(input_box_, LV_STATE_FOCUSED);
 
-        status_label_ = lv_label_create(screen);
-        lv_obj_set_style_text_color(status_label_, kStatusColor, LV_PART_MAIN);
-        lv_obj_set_style_text_font(status_label_, &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_align(status_label_, LV_ALIGN_BOTTOM_LEFT, 6, -2);
-        lv_label_set_text(status_label_, "FN+Q/W menu  FN+Backspace clear");
+        status_label_ = nullptr;
+
+        lv_style_init(&busy_style_);
+        updateBusyBinding(false);
+        root_ = root;
+        history_lines_.clear();
+        history_lines_.push_back("CAS ready. Enter to eval.");
+        refreshHistoryList();
     }
 
-    void XcasUi::switchMenu(int delta)
+    void XcasUi::updateHeaderText()
     {
-        const int menu_count = static_cast<int>(sizeof(kMenus) / sizeof(kMenus[0]));
-        menu_index_ = (menu_index_ + delta + menu_count) % menu_count;
+        if (subjects_initialized_) {
+            lv_subject_copy_string(&header_subject_, "CAS / Expression Mode");
+        }
+    }
 
-        char text[64];
-        std::snprintf(text, sizeof(text), "[%s]  %s  %s  %s", kMenus[0], kMenus[1], kMenus[2], kMenus[3]);
-        // highlight selected by replacing [] around target menu only
-        std::snprintf(text, sizeof(text), "%c%s%c  %c%s%c  %c%s%c  %c%s%c",
-                      menu_index_ == 0 ? '[' : ' ', kMenus[0], menu_index_ == 0 ? ']' : ' ',
-                      menu_index_ == 1 ? '[' : ' ', kMenus[1], menu_index_ == 1 ? ']' : ' ',
-                      menu_index_ == 2 ? '[' : ' ', kMenus[2], menu_index_ == 2 ? ']' : ' ',
-                      menu_index_ == 3 ? '[' : ' ', kMenus[3], menu_index_ == 3 ? ']' : ' ');
-        if (menu_label_ != nullptr)
-        {
-            lv_label_set_text(menu_label_, text);
+    void XcasUi::recallHistory(int delta)
+    {
+        if (input_box_ == nullptr || command_history_.empty()) {
+            return;
+        }
+
+        if (history_cursor_ < 0 && delta < 0) {
+            const char *current = lv_textarea_get_text(input_box_);
+            history_draft_input_ = current ? current : "";
+            history_cursor_ = static_cast<int>(command_history_.size()) - 1;
+        } else {
+            history_cursor_ += delta;
+        }
+
+        if (history_cursor_ < -1) {
+            history_cursor_ = -1;
+        }
+
+        if (history_cursor_ >= static_cast<int>(command_history_.size())) {
+            history_cursor_ = static_cast<int>(command_history_.size()) - 1;
+        }
+
+        if (history_cursor_ == -1) {
+            lv_textarea_set_text(input_box_, history_draft_input_.c_str());
+            setStatusText("Draft restored");
+            return;
+        }
+
+        lv_textarea_set_text(input_box_, command_history_[history_cursor_].c_str());
+        lv_textarea_set_cursor_pos(input_box_, LV_TEXTAREA_CURSOR_LAST);
+        setStatusText("History recall");
+    }
+
+    void XcasUi::setStatusText(const char *text)
+    {
+        if (text == nullptr) {
+            return;
+        }
+
+        if (status_label_ != nullptr) {
+            lv_label_set_text(status_label_, text);
+        }
+    }
+
+    void XcasUi::updateBusyBinding(bool busy)
+    {
+        if (subjects_initialized_) {
+            lv_subject_set_int(&busy_subject_, busy ? 1 : 0);
         }
     }
 
@@ -290,30 +397,125 @@ namespace xcas
 
     void XcasUi::appendHistory(const std::string &line)
     {
-        if (history_label_ == nullptr || history_panel_ == nullptr)
+        if (history_list_ == nullptr || history_panel_ == nullptr)
         {
             return;
         }
 
-        if (!history_text_.empty())
-        {
-            history_text_ += "\n";
+        history_lines_.push_back(line);
+        const std::size_t kMaxHistoryLines = 40;
+        if (history_lines_.size() > kMaxHistoryLines) {
+            history_lines_.erase(history_lines_.begin(), history_lines_.begin() + static_cast<long>(history_lines_.size() - kMaxHistoryLines));
         }
-        history_text_ += line;
+        refreshHistoryList();
+    }
 
-        const std::size_t kMaxHistoryChars = 2400;
-        if (history_text_.size() > kMaxHistoryChars)
-        {
-            history_text_.erase(0, history_text_.size() - kMaxHistoryChars);
+    void XcasUi::refreshHistoryList()
+    {
+        if (history_list_ == nullptr || history_panel_ == nullptr) {
+            return;
         }
 
-        lv_label_set_text(history_label_, history_text_.c_str());
-        lv_obj_scroll_to_view_recursive(history_label_, LV_ANIM_OFF);
+        lv_obj_t *selected_row = nullptr;
+        lv_obj_clean(history_list_);
+        for (size_t i = 0; i < history_lines_.size(); ++i) {
+            const std::string &line = history_lines_[i];
+            const bool is_input = (line.size() >= 2 && line[0] == '>' && line[1] == ' ');
+
+            lv_obj_t *row = lv_obj_create(history_list_);
+            lv_obj_set_width(row, lv_pct(100));
+            lv_obj_set_height(row, LV_SIZE_CONTENT);
+            lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_style_radius(row, 0, LV_PART_MAIN);
+            lv_obj_set_style_border_width(row, 0, LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_set_style_pad_all(row, 0, LV_PART_MAIN);
+            lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+            lv_obj_set_flex_align(
+                row,
+                is_input ? LV_FLEX_ALIGN_START : LV_FLEX_ALIGN_END,
+                LV_FLEX_ALIGN_START,
+                LV_FLEX_ALIGN_START);
+            lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_user_data(row, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
+            lv_obj_add_event_cb(row, &XcasUi::onHistoryRowEvent, LV_EVENT_CLICKED, this);
+
+            lv_obj_t *bubble = lv_label_create(row);
+            const lv_coord_t bubble_max_w =
+                static_cast<lv_coord_t>(board::CardputerBsp::kDisplayWidth * 82 / 100);
+            lv_obj_set_style_max_width(bubble, bubble_max_w, LV_PART_MAIN);
+            lv_obj_set_width(bubble, LV_SIZE_CONTENT);
+            lv_label_set_long_mode(bubble, LV_LABEL_LONG_WRAP);
+            lv_obj_set_style_radius(bubble, 6, LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(bubble, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_pad_left(bubble, 6, LV_PART_MAIN);
+            lv_obj_set_style_pad_right(bubble, 6, LV_PART_MAIN);
+            lv_obj_set_style_pad_top(bubble, 2, LV_PART_MAIN);
+            lv_obj_set_style_pad_bottom(bubble, 2, LV_PART_MAIN);
+            lv_obj_set_style_text_font(bubble, &lv_font_montserrat_14, LV_PART_MAIN);
+            lv_obj_set_style_text_color(bubble, kTextColor, LV_PART_MAIN);
+            if (is_input) {
+                lv_obj_set_style_bg_color(bubble, LV_COLOR_MAKE(214, 230, 250), LV_PART_MAIN);
+                lv_obj_set_style_text_align(bubble, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN);
+            } else {
+                lv_obj_set_style_bg_color(bubble, LV_COLOR_MAKE(220, 238, 222), LV_PART_MAIN);
+                lv_obj_set_style_text_align(bubble, LV_TEXT_ALIGN_RIGHT, LV_PART_MAIN);
+            }
+            lv_label_set_text(bubble, line.c_str());
+
+            if (selected_history_index_ == static_cast<int>(i)) {
+                lv_obj_set_style_bg_color(bubble, kAccentColor, LV_PART_MAIN);
+                lv_obj_set_style_text_color(bubble, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
+                selected_row = row;
+            }
+        }
+
+        if (selected_history_index_ >= static_cast<int>(history_lines_.size())) {
+            selected_history_index_ = static_cast<int>(history_lines_.empty() ? -1 : (history_lines_.size() - 1));
+        }
+
+        if (selected_row != nullptr) {
+            lv_obj_scroll_to_view_recursive(selected_row, LV_ANIM_OFF);
+        } else {
+            lv_obj_scroll_to_y(history_panel_, LV_COORD_MAX, LV_ANIM_OFF);
+        }
+    }
+
+    void XcasUi::selectHistoryIndex(int index, bool applyToInput)
+    {
+        if (history_lines_.empty()) {
+            selected_history_index_ = -1;
+            return;
+        }
+
+        if (index < 0) {
+            index = 0;
+        }
+        if (index >= static_cast<int>(history_lines_.size())) {
+            index = static_cast<int>(history_lines_.size()) - 1;
+        }
+
+        selected_history_index_ = index;
+        refreshHistoryList();
+
+        if (!applyToInput || input_box_ == nullptr) {
+            return;
+        }
+
+        const std::string &line = history_lines_[selected_history_index_];
+        const char *text = line.c_str();
+        if (!line.empty() && line[0] == '>' && line.size() > 2) {
+            text = line.c_str() + 2;
+        }
+
+        lv_textarea_set_text(input_box_, text);
+        lv_textarea_set_cursor_pos(input_box_, LV_TEXTAREA_CURSOR_LAST);
+        setStatusText("History selected");
     }
 
     void XcasUi::submitInput()
     {
-        if (input_box_ == nullptr || status_label_ == nullptr)
+        if (input_box_ == nullptr)
         {
             return;
         }
@@ -324,21 +526,25 @@ namespace xcas
             return;
         }
 
-        if (service_.busy())
-        {
-            lv_label_set_text(status_label_, "Evaluator busy...");
+        if (service_.busy()) {
+            setStatusText("Evaluator busy...");
+            updateBusyBinding(true);
             return;
         }
 
-        if (!service_.submit(expr))
-        {
-            lv_label_set_text(status_label_, "Queue full or invalid input");
+        if (!service_.submit(expr)) {
+            setStatusText("Queue full or invalid input");
+            updateBusyBinding(true);
             return;
         }
 
         appendHistory(std::string("> ") + expr);
+        command_history_.emplace_back(expr);
+        history_cursor_ = -1;
+        history_draft_input_.clear();
         lv_textarea_set_text(input_box_, "");
-        lv_label_set_text(status_label_, "Calculating...");
+        setStatusText("Calculating...");
+        updateBusyBinding(true);
     }
 
     void XcasUi::handleKeyboardState(uint64_t pressed_mask)
@@ -353,18 +559,12 @@ namespace xcas
         if ((newly_pressed & fn_bit) != 0U)
         {
             fn_toggled_ = !fn_toggled_;
-            if (status_label_ != nullptr)
-            {
-                lv_label_set_text(status_label_, fn_toggled_ ? "FN locked" : "FN unlocked");
-            }
+            setStatusText(fn_toggled_ ? "FN locked" : "FN unlocked");
         }
         if ((newly_pressed & shift_bit) != 0U)
         {
             caps_toggled_ = !caps_toggled_;
-            if (status_label_ != nullptr)
-            {
-                lv_label_set_text(status_label_, caps_toggled_ ? "CAPS ON" : "caps off");
-            }
+            setStatusText(caps_toggled_ ? "CAPS ON" : "caps off");
         }
 
         const bool fn_active = fn_toggled_;
@@ -410,59 +610,78 @@ namespace xcas
                     continue;
                 }
 
-                if (fn_active)
+                // Enter loads the highlighted history entry into the input box
+                // while browsing; otherwise it evaluates the current expression.
+                if (keyIs(key, "Enter"))
                 {
-                    if (keyIs(key, "`"))
+                    if (selected_history_index_ >= 0)
                     {
-                        lv_textarea_set_text(input_box_, "");
-                        lv_label_set_text(status_label_, "Esc");
+                        selectHistoryIndex(selected_history_index_, true);
+                        selected_history_index_ = -1;
+                        refreshHistoryList();
+                        setStatusText("Loaded to input");
                     }
-                    else if (keyIs(key, "Backspace"))
+                    else
                     {
-                        lv_textarea_delete_char_forward(input_box_);
-                        lv_label_set_text(status_label_, "Del");
-                    }
-                    else if (keyIs(key, ";"))
-                    {
-                        switchMenu(-1);
-                        lv_label_set_text(status_label_, "Up");
-                    }
-                    else if (keyIs(key, ","))
-                    {
-                        moveCursor(-1);
-                        lv_label_set_text(status_label_, "Left");
-                    }
-                    else if (keyIs(key, "."))
-                    {
-                        switchMenu(1);
-                        lv_label_set_text(status_label_, "Down");
-                    }
-                    else if (keyIs(key, "/"))
-                    {
-                        moveCursor(1);
-                        lv_label_set_text(status_label_, "Right");
-                    }
-                    else if (keyIs(key, "q"))
-                    {
-                        switchMenu(-1);
-                    }
-                    else if (keyIs(key, "w"))
-                    {
-                        switchMenu(1);
-                    }
-                    else if (keyIs(key, "Enter"))
-                    {
-                        lv_textarea_set_text(input_box_, "");
-                        lv_label_set_text(status_label_, "Input cleared");
+                        submitInput();
                     }
                     continue;
                 }
 
-                if (keyIs(key, "Enter"))
+                if (fn_active)
                 {
-                    submitInput();
-                    continue;
+                    bool fn_handled = true;
+                    if (keyIs(key, "`"))
+                    {
+                        lv_textarea_set_text(input_box_, "");
+                        setStatusText("Esc");
+                    }
+                    else if (keyIs(key, "Backspace"))
+                    {
+                        lv_textarea_delete_char_forward(input_box_);
+                        setStatusText("Del");
+                    }
+                    else if (keyIs(key, ";"))
+                    {
+                        if (selected_history_index_ < 0) {
+                            selectHistoryIndex(static_cast<int>(history_lines_.size()) - 1, false);
+                        } else {
+                            selectHistoryIndex(selected_history_index_ - 1, false);
+                        }
+                        setStatusText("History up");
+                    }
+                    else if (keyIs(key, "."))
+                    {
+                        if (selected_history_index_ < 0) {
+                            selectHistoryIndex(static_cast<int>(history_lines_.size()) - 1, false);
+                        } else {
+                            selectHistoryIndex(selected_history_index_ + 1, false);
+                        }
+                        setStatusText("History down");
+                    }
+                    else if (keyIs(key, ","))
+                    {
+                        moveCursor(-1);
+                        setStatusText("Left");
+                    }
+                    else if (keyIs(key, "/"))
+                    {
+                        moveCursor(1);
+                        setStatusText("Right");
+                    }
+                    else
+                    {
+                        fn_handled = false;
+                    }
+
+                    if (fn_handled)
+                    {
+                        continue;
+                    }
+                    // No Fn-specific action for this key: fall through so the key
+                    // still produces its normal character (letters, digits, ...).
                 }
+
                 if (keyIs(key, "Backspace"))
                 {
                     lv_textarea_delete_char(input_box_);
@@ -475,11 +694,11 @@ namespace xcas
                 }
                 if (keyIs(key, "Tab"))
                 {
-                    appendInput("x");
+                    appendInput("^");
                     continue;
                 }
 
-                if (keyIs(key, "`") && !fn_active)
+                if (keyIs(key, "`"))
                 {
                     appendInput("`");
                     continue;
@@ -504,11 +723,16 @@ namespace xcas
         if (service_.pollResult(result))
         {
             appendHistory(result);
-            lv_label_set_text(status_label_, "Done");
+            setStatusText("Done");
+            updateBusyBinding(false);
         }
         else if (service_.busy())
         {
-            lv_label_set_text(status_label_, "Calculating...");
+            setStatusText("Calculating...");
+            updateBusyBinding(true);
+        }
+        else {
+            updateBusyBinding(false);
         }
 
         if (redraw_recovery_pending_)
@@ -517,20 +741,26 @@ namespace xcas
             redraw_recovery_pending_ = false;
         }
 
-        const uint64_t now_us = esp_timer_get_time();
-        uint32_t elapsed_ms = 10;
-        if (last_render_us_ != 0 && now_us > last_render_us_)
-        {
-            elapsed_ms = static_cast<uint32_t>((now_us - last_render_us_) / 1000ULL);
-            if (elapsed_ms == 0)
-            {
-                elapsed_ms = 1;
-            }
-        }
-        last_render_us_ = now_us;
+        // NOTE: lv_tick_inc()/lv_timer_handler() are pumped centrally by
+        // Kernel::pumpLvgl() every frame so that the display keeps flushing
+        // regardless of which app is currently focused.
+    }
 
-        lv_tick_inc(elapsed_ms);
-        lv_timer_handler();
+    void XcasUi::show()
+    {
+        initializeLvgl();
+        if (root_ != nullptr) {
+            lv_obj_clear_flag(root_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(root_);
+        }
+        redraw_recovery_pending_ = true;
+    }
+
+    void XcasUi::hide()
+    {
+        if (root_ != nullptr) {
+            lv_obj_add_flag(root_, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
 } // namespace xcas

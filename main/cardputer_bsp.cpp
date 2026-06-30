@@ -1,11 +1,13 @@
 #include "cardputer_bsp.hpp"
 
 #include <cstdint>
+#include <cstdio>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/uart.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
@@ -157,13 +159,94 @@ void CardputerBsp::initializeMidiUart()
 void CardputerBsp::presentFrame(const uint16_t *framebuffer)
 {
     ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_, 0, 0, kDisplayWidth, kDisplayHeight, framebuffer));
+    stashScreenshotRegion(0, 0, kDisplayWidth, kDisplayHeight, framebuffer);
     xSemaphoreTake(lcd_flush_done_, portMAX_DELAY);
 }
 
 void CardputerBsp::presentArea(int x1, int y1, int x2, int y2, const uint16_t *pixels)
 {
     ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_, x1, y1, x2, y2, pixels));
+    stashScreenshotRegion(x1, y1, x2, y2, pixels);
     xSemaphoreTake(lcd_flush_done_, portMAX_DELAY);
+}
+
+void CardputerBsp::stashScreenshotRegion(int x1, int y1, int x2, int y2, const uint16_t *pixels)
+{
+    if (screenshot_buf_ == nullptr) {
+        return;
+    }
+
+    const int w = x2 - x1;
+    const int h = y2 - y1;
+    for (int row = 0; row < h; ++row) {
+        const int dy = y1 + row;
+        if (dy < 0 || dy >= kDisplayHeight) {
+            continue;
+        }
+        for (int col = 0; col < w; ++col) {
+            const int dx = x1 + col;
+            if (dx < 0 || dx >= kDisplayWidth) {
+                continue;
+            }
+            screenshot_buf_[dy * kDisplayWidth + dx] = pixels[row * w + col];
+        }
+    }
+}
+
+bool CardputerBsp::beginScreenshotCapture()
+{
+    if (screenshot_buf_ == nullptr) {
+        screenshot_buf_ = static_cast<uint16_t *>(heap_caps_malloc(
+            static_cast<size_t>(kDisplayWidth) * kDisplayHeight * sizeof(uint16_t), MALLOC_CAP_8BIT));
+    }
+    return screenshot_buf_ != nullptr;
+}
+
+void CardputerBsp::endScreenshotCapture()
+{
+    if (screenshot_buf_ != nullptr) {
+        heap_caps_free(screenshot_buf_);
+        screenshot_buf_ = nullptr;
+    }
+}
+
+void CardputerBsp::emitScreenshot()
+{
+    if (screenshot_buf_ == nullptr) {
+        printf("SHOT_ERR no_buffer\n");
+        return;
+    }
+
+    static const char kB64[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    const auto *bytes = reinterpret_cast<const uint8_t *>(screenshot_buf_);
+    const size_t total = static_cast<size_t>(kDisplayWidth) * kDisplayHeight * sizeof(uint16_t);
+
+    printf("SHOT_BEGIN w=%d h=%d fmt=rgb565le bytes=%u\n", kDisplayWidth, kDisplayHeight,
+           static_cast<unsigned>(total));
+
+    // 16 groups of 3 input bytes -> 64 base64 chars per emitted line.
+    char line[65];
+    size_t i = 0;
+    while (i < total) {
+        int n = 0;
+        for (int group = 0; group < 16 && i < total; ++group) {
+            const uint32_t b0 = bytes[i];
+            const uint32_t b1 = (i + 1 < total) ? bytes[i + 1] : 0;
+            const uint32_t b2 = (i + 2 < total) ? bytes[i + 2] : 0;
+            const uint32_t triple = (b0 << 16) | (b1 << 8) | b2;
+            line[n++] = kB64[(triple >> 18) & 0x3F];
+            line[n++] = kB64[(triple >> 12) & 0x3F];
+            line[n++] = (i + 1 < total) ? kB64[(triple >> 6) & 0x3F] : '=';
+            line[n++] = (i + 2 < total) ? kB64[triple & 0x3F] : '=';
+            i += 3;
+        }
+        line[n] = '\0';
+        printf("SHOT:%s\n", line);
+    }
+
+    printf("SHOT_END\n");
 }
 
 uint64_t CardputerBsp::scanKeyboardState()
