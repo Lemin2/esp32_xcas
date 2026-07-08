@@ -19,6 +19,7 @@ public:
     bool start();
     uint64_t scanKeyboardState();
     void handleKeyboardState(uint64_t pressedMask);
+    void handleMappedKey(uint32_t key);
     void render();
 
 private:

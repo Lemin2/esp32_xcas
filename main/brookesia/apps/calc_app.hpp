@@ -15,6 +15,7 @@ public:
     void onFocus() override;
     void onBlur() override;
     void handleKeyboardState(uint64_t pressedMask) override;
+    void handleMappedKey(uint32_t key) override;
     void render() override;
 
 private:

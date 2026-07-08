@@ -26,6 +26,11 @@ void CalcApp::handleKeyboardState(uint64_t pressedMask)
     ui_.handleKeyboardState(pressedMask);
 }
 
+void CalcApp::handleMappedKey(uint32_t key)
+{
+    ui_.enqueueInputKey(key);
+}
+
 void CalcApp::render()
 {
     ui_.render();

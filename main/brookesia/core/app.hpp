@@ -13,6 +13,7 @@ public:
     virtual void onBlur() {}
     virtual void onSuspend() {}
     virtual void handleKeyboardState(uint64_t pressedMask) = 0;
+    virtual void handleMappedKey(uint32_t key) { (void)key; }
     virtual void render() = 0;
 };
 

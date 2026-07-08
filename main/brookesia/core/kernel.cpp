@@ -27,6 +27,30 @@ uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
     return static_cast<uint16_t>(((r & 0xF8U) << 8) | ((g & 0xFCU) << 3) | (b >> 3));
 }
 
+void animSetOpa(void *obj, int32_t v)
+{
+    lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(v), LV_PART_MAIN);
+}
+
+void animSetTranslateY(void *obj, int32_t v)
+{
+    lv_obj_set_style_translate_y(static_cast<lv_obj_t *>(obj), static_cast<lv_coord_t>(v), LV_PART_MAIN);
+}
+
+void animHideComplete(lv_anim_t *a)
+{
+    if (a == nullptr) {
+        return;
+    }
+    auto *obj = static_cast<lv_obj_t *>(a->var);
+    if (obj == nullptr) {
+        return;
+    }
+    lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_translate_y(obj, 0, LV_PART_MAIN);
+}
+
 } // namespace
 
 Kernel::Kernel() : services_(board_, casService_) {}
@@ -98,6 +122,14 @@ void Kernel::handleKeyboardState(uint64_t pressedMask)
     auto &app = apps_[static_cast<size_t>(router_.current())];
     if (app) {
         app->handleKeyboardState(pressedMask);
+    }
+}
+
+void Kernel::handleMappedKey(uint32_t key)
+{
+    auto &app = apps_[static_cast<size_t>(router_.current())];
+    if (app) {
+        app->handleMappedKey(key);
     }
 }
 
@@ -237,6 +269,20 @@ void Kernel::ensureAppMenu()
         lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+        static lv_style_prop_t trans_props[] = {
+            LV_STYLE_OUTLINE_WIDTH,
+            LV_STYLE_TRANSFORM_WIDTH,
+            LV_STYLE_TRANSFORM_HEIGHT,
+            LV_STYLE_PROP_INV,
+        };
+        static lv_style_transition_dsc_t trans_dsc;
+        static bool trans_inited = false;
+        if (!trans_inited) {
+            lv_style_transition_dsc_init(&trans_dsc, trans_props, lv_anim_path_ease_out, 140, 0, nullptr);
+            trans_inited = true;
+        }
+        lv_obj_set_style_transition(tile, &trans_dsc, LV_PART_MAIN);
+
         lv_obj_t *icon = lv_label_create(tile);
         lv_obj_set_style_text_color(icon, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
         lv_obj_set_style_text_font(icon, &lv_font_montserrat_14, LV_PART_MAIN);
@@ -263,11 +309,52 @@ void Kernel::showAppMenu(bool show)
     }
 
     if (show) {
+        lv_anim_delete(menu_overlay_, nullptr);
         lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(menu_overlay_);
+        lv_obj_set_style_opa(menu_overlay_, LV_OPA_0, LV_PART_MAIN);
+        lv_obj_set_style_translate_y(menu_overlay_, 6, LV_PART_MAIN);
+
+        lv_anim_t fade_in;
+        lv_anim_init(&fade_in);
+        lv_anim_set_var(&fade_in, menu_overlay_);
+        lv_anim_set_exec_cb(&fade_in, animSetOpa);
+        lv_anim_set_values(&fade_in, LV_OPA_0, LV_OPA_COVER);
+        lv_anim_set_duration(&fade_in, 170);
+        lv_anim_set_path_cb(&fade_in, lv_anim_path_ease_out);
+        lv_anim_start(&fade_in);
+
+        lv_anim_t rise_in;
+        lv_anim_init(&rise_in);
+        lv_anim_set_var(&rise_in, menu_overlay_);
+        lv_anim_set_exec_cb(&rise_in, animSetTranslateY);
+        lv_anim_set_values(&rise_in, 6, 0);
+        lv_anim_set_duration(&rise_in, 170);
+        lv_anim_set_path_cb(&rise_in, lv_anim_path_ease_out);
+        lv_anim_start(&rise_in);
+
         updateAppMenu();
     } else {
-        lv_obj_add_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
+        lv_anim_delete(menu_overlay_, nullptr);
+
+        lv_anim_t fade_out;
+        lv_anim_init(&fade_out);
+        lv_anim_set_var(&fade_out, menu_overlay_);
+        lv_anim_set_exec_cb(&fade_out, animSetOpa);
+        lv_anim_set_values(&fade_out, LV_OPA_COVER, LV_OPA_0);
+        lv_anim_set_duration(&fade_out, 120);
+        lv_anim_set_path_cb(&fade_out, lv_anim_path_ease_in);
+        lv_anim_set_completed_cb(&fade_out, animHideComplete);
+        lv_anim_start(&fade_out);
+
+        lv_anim_t drop_out;
+        lv_anim_init(&drop_out);
+        lv_anim_set_var(&drop_out, menu_overlay_);
+        lv_anim_set_exec_cb(&drop_out, animSetTranslateY);
+        lv_anim_set_values(&drop_out, 0, 4);
+        lv_anim_set_duration(&drop_out, 120);
+        lv_anim_set_path_cb(&drop_out, lv_anim_path_ease_in);
+        lv_anim_start(&drop_out);
     }
 }
 
@@ -303,7 +390,7 @@ void Kernel::updateAppMenu()
 bool Kernel::buildApps()
 {
     apps_[static_cast<size_t>(Route::Calc)] = std::make_unique<CalcApp>(services_);
-    apps_[static_cast<size_t>(Route::Graph)] = std::make_unique<GraphApp>();
+    apps_[static_cast<size_t>(Route::Graph)] = std::make_unique<GraphApp>(services_);
     apps_[static_cast<size_t>(Route::Files)] = std::make_unique<FilesApp>();
     apps_[static_cast<size_t>(Route::Project)] = std::make_unique<ProjectApp>();
     apps_[static_cast<size_t>(Route::Settings)] = std::make_unique<SettingsApp>(services_);
