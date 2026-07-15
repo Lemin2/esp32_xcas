@@ -11,6 +11,9 @@
 #include "cardputer_bsp.hpp"
 
 #include "brookesia/apps/fs_util.hpp"
+#include "brookesia/core/ui_theme.hpp"
+
+namespace ui_theme = brookesia::ui_theme;
 
 namespace brookesia {
 namespace {
@@ -47,8 +50,7 @@ void ProjectApp::ensureUi()
     lv_obj_remove_style_all(root_);
     lv_obj_set_size(root_, w, h - 16);
     lv_obj_align(root_, LV_ALIGN_TOP_LEFT, 0, 16);
-    lv_obj_set_style_bg_color(root_, LV_COLOR_MAKE(245, 245, 238), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(root_, LV_OPA_COVER, LV_PART_MAIN);
+    ui_theme::applyPage(root_, LV_COLOR_MAKE(245, 245, 238));
     lv_obj_set_style_pad_all(root_, 6, LV_PART_MAIN);
     lv_obj_set_flex_flow(root_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(root_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
@@ -56,18 +58,18 @@ void ProjectApp::ensureUi()
     lv_obj_clear_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
 
     title_ = lv_label_create(root_);
-    lv_obj_set_style_text_font(title_, &lv_font_montserrat_14, LV_PART_MAIN);
+    ui_theme::applyText16(title_);
     lv_obj_set_style_text_color(title_, LV_COLOR_MAKE(24, 84, 192), LV_PART_MAIN);
     lv_label_set_text(title_, "Projects");
 
     body_ = lv_label_create(root_);
-    lv_obj_set_style_text_font(body_, &lv_font_montserrat_14, LV_PART_MAIN);
+    ui_theme::applyText14(body_);
     lv_obj_set_style_text_color(body_, LV_COLOR_MAKE(16, 24, 36), LV_PART_MAIN);
     lv_label_set_long_mode(body_, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(body_, w - 16);
 
     hint_ = lv_label_create(root_);
-    lv_obj_set_style_text_font(hint_, &lv_font_montserrat_14, LV_PART_MAIN);
+    ui_theme::applyText14(hint_);
     lv_obj_set_style_text_color(hint_, LV_COLOR_MAKE(120, 130, 144), LV_PART_MAIN);
     lv_obj_align(hint_, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     lv_label_set_text(hint_, ";/. select  Enter new  Bksp del");

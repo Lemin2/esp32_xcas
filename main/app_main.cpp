@@ -1,13 +1,18 @@
-#include "brookesia/core/kernel.hpp"
-
-#include <atomic>
+#include <algorithm>
 #include <array>
+#include <atomic>
+#include <cstdio>
 #include <cstring>
 
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "lvgl.h"
+#include "brookesia/core/kernel.hpp"
+#include "xcas_service.hpp"
+#include "cardputer_bsp.hpp"
+#include "mathlayout/render/text_renderer.hpp"
 
 namespace {
 
@@ -141,7 +146,15 @@ public:
             return;
         }
 
+        const BaseType_t serial_ok = xTaskCreatePinnedToCore(
+            &XcasApplication::serialTaskEntry, "xcas_serial_task", 6 * 1024, this, 3, nullptr, 0);
+        if (serial_ok != pdPASS) {
+            ESP_LOGE(kTag, "failed to create xcas_serial_task");
+            return;
+        }
+
         ESP_LOGI(kTag, "brookesia GUI started");
+        ESP_LOGI(kTag, "serial automation ready: ML SUBMIT <expr> | ML SHOT | ML RUN <expr>");
     }
 
 private:
@@ -155,6 +168,11 @@ private:
         static_cast<XcasApplication *>(ctx)->keyboardTask();
     }
 
+    static void serialTaskEntry(void *ctx)
+    {
+        static_cast<XcasApplication *>(ctx)->serialTask();
+    }
+
     void uiTask()
     {
         ESP_LOGI(kTag, "ui task alive");
@@ -165,6 +183,7 @@ private:
             while (popMappedKey(key)) {
                 kernel_.handleMappedKey(key);
             }
+            processDebugCommands();
             kernel_.render();
             TickType_t period = pdMS_TO_TICKS(16);
             if (period == 0) {
@@ -226,6 +245,143 @@ private:
         }
     }
 
+    enum class DebugCmdType : uint8_t {
+        Submit,
+        Screenshot,
+        Run,
+    };
+
+    struct DebugCommand {
+        DebugCmdType type = DebugCmdType::Screenshot;
+        std::array<char, 192> payload{};
+    };
+
+    void enqueueDebugCommand(DebugCmdType type, const char *payload)
+    {
+        const uint8_t tail = debug_tail_.load(std::memory_order_relaxed);
+        uint8_t head = debug_head_.load(std::memory_order_acquire);
+        const uint8_t next_tail = static_cast<uint8_t>((tail + 1U) % debug_cmds_.size());
+
+        if (next_tail == head) {
+            head = static_cast<uint8_t>((head + 1U) % debug_cmds_.size());
+            debug_head_.store(head, std::memory_order_release);
+        }
+
+        DebugCommand cmd{};
+        cmd.type = type;
+        if (payload != nullptr) {
+            std::snprintf(cmd.payload.data(), cmd.payload.size(), "%s", payload);
+        }
+        debug_cmds_[tail] = cmd;
+        debug_tail_.store(next_tail, std::memory_order_release);
+    }
+
+    bool dequeueDebugCommand(DebugCommand &out)
+    {
+        const uint8_t head = debug_head_.load(std::memory_order_relaxed);
+        const uint8_t tail = debug_tail_.load(std::memory_order_acquire);
+        if (head == tail) {
+            return false;
+        }
+
+        out = debug_cmds_[head];
+        const uint8_t next_head = static_cast<uint8_t>((head + 1U) % debug_cmds_.size());
+        debug_head_.store(next_head, std::memory_order_release);
+        return true;
+    }
+
+    void processDebugCommands()
+    {
+        DebugCommand cmd{};
+        while (dequeueDebugCommand(cmd)) {
+            switch (cmd.type) {
+            case DebugCmdType::Submit:
+                kernel_.debugSubmitFormula(cmd.payload.data());
+                break;
+            case DebugCmdType::Screenshot:
+                kernel_.requestScreenshot();
+                break;
+            case DebugCmdType::Run:
+                kernel_.debugSubmitFormula(cmd.payload.data());
+                pending_screenshot_frames_ = 45;
+                break;
+            }
+        }
+
+        if (pending_screenshot_frames_ > 0) {
+            --pending_screenshot_frames_;
+            if (pending_screenshot_frames_ == 0) {
+                kernel_.requestScreenshot();
+            }
+        }
+    }
+
+    void serialTask()
+    {
+        static constexpr size_t kBufSize = 256;
+        char line[kBufSize] = {0};
+        size_t len = 0;
+
+        for (;;) {
+            const int c = std::getchar();
+            if (c < 0) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
+
+            if (c == '\r' || c == '\n') {
+                line[len] = '\0';
+                if (len > 0) {
+                    handleSerialLine(line);
+                }
+                len = 0;
+                continue;
+            }
+
+            if (len + 1U < kBufSize) {
+                line[len++] = static_cast<char>(c);
+            }
+        }
+    }
+
+    void handleSerialLine(const char *line)
+    {
+        if (line == nullptr) {
+            return;
+        }
+
+        if (std::strncmp(line, "ML SUBMIT ", 10) == 0) {
+            enqueueDebugCommand(DebugCmdType::Submit, line + 10);
+            std::printf("ML_ACK SUBMIT\n");
+            return;
+        }
+        if (std::strcmp(line, "ML SHOT") == 0) {
+            enqueueDebugCommand(DebugCmdType::Screenshot, nullptr);
+            std::printf("ML_ACK SHOT\n");
+            return;
+        }
+        if (std::strncmp(line, "ML RUN ", 7) == 0) {
+            enqueueDebugCommand(DebugCmdType::Run, line + 7);
+            std::printf("ML_ACK RUN\n");
+            return;
+        }
+        if (std::strncmp(line, "ML RENDER ", 10) == 0) {
+            const std::string expr(line + 10);
+            const xcas::mathlayout::TextBox box = xcas::mathlayout::renderText(expr);
+            std::printf("ML_RENDER_BEGIN\n");
+            for (const auto &l : box.lines) {
+                std::printf("ML_LINE:%s\n", l.c_str());
+            }
+            std::printf("ML_RENDER_END baseline=%d height=%d\n",
+                        box.baseline, box.height());
+            return;
+        }
+        if (std::strcmp(line, "ML HELP") == 0) {
+            std::printf("ML_HELP Commands: ML SUBMIT <expr> | ML SHOT | ML RUN <expr> | ML RENDER <expr>\n");
+            return;
+        }
+    }
+
     void pushMappedKey(uint32_t key)
     {
         const uint8_t tail = mapped_tail_.load(std::memory_order_relaxed);
@@ -260,6 +416,10 @@ private:
     std::array<uint32_t, 64> mapped_keys_{};
     std::atomic<uint8_t> mapped_head_{0};
     std::atomic<uint8_t> mapped_tail_{0};
+    std::array<DebugCommand, 16> debug_cmds_{};
+    std::atomic<uint8_t> debug_head_{0};
+    std::atomic<uint8_t> debug_tail_{0};
+    int pending_screenshot_frames_ = 0;
 };
 
 } // namespace

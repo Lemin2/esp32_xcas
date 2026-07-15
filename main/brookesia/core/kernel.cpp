@@ -11,6 +11,9 @@
 #include "brookesia/apps/graph_app.hpp"
 #include "brookesia/apps/project_app.hpp"
 #include "brookesia/apps/settings_app.hpp"
+#include "brookesia/core/ui_theme.hpp"
+
+namespace ui_theme = brookesia::ui_theme;
 
 namespace brookesia {
 namespace {
@@ -133,6 +136,28 @@ void Kernel::handleMappedKey(uint32_t key)
     }
 }
 
+void Kernel::debugSubmitFormula(const char *formula)
+{
+    if (formula == nullptr || formula[0] == '\0') {
+        return;
+    }
+
+    if (router_.current() != Route::Calc) {
+        switchTo(Route::Calc);
+    }
+
+    auto *calc = dynamic_cast<CalcApp *>(apps_[static_cast<size_t>(Route::Calc)].get());
+    if (calc == nullptr) {
+        return;
+    }
+    calc->debugSubmitFormula(formula);
+}
+
+void Kernel::requestScreenshot()
+{
+    screenshot_pending_ = true;
+}
+
 void Kernel::render()
 {
     auto &app = apps_[static_cast<size_t>(router_.current())];
@@ -236,13 +261,7 @@ void Kernel::ensureAppMenu()
     menu_overlay_ = lv_obj_create(screen);
     lv_obj_set_size(menu_overlay_, 230, 122);
     lv_obj_align(menu_overlay_, LV_ALIGN_CENTER, 0, 7);
-    lv_obj_set_style_radius(menu_overlay_, 12, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(menu_overlay_, LV_COLOR_MAKE(24, 30, 46), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(menu_overlay_, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(menu_overlay_, 8, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(menu_overlay_, 6, LV_PART_MAIN);
-    lv_obj_set_style_pad_column(menu_overlay_, 6, LV_PART_MAIN);
+    ui_theme::applyMenuOverlay(menu_overlay_, LV_COLOR_MAKE(24, 30, 46), LV_COLOR_MAKE(24, 30, 46), 0);
     lv_obj_set_flex_flow(menu_overlay_, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(menu_overlay_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_SCROLLABLE);
@@ -254,18 +273,15 @@ void Kernel::ensureAppMenu()
 
     for (size_t i = 0; i < kRouteCount; ++i) {
         const uint32_t rgb = kTileRgb[i];
-        const lv_color_t tile_color =
-            LV_COLOR_MAKE((rgb >> 16) & 0xFFU, (rgb >> 8) & 0xFFU, rgb & 0xFFU);
+        const uint8_t red = static_cast<uint8_t>((rgb >> 16) & 0xFFU);
+        const uint8_t green = static_cast<uint8_t>((rgb >> 8) & 0xFFU);
+        const uint8_t blue = static_cast<uint8_t>(rgb & 0xFFU);
+        const lv_color_t tile_color = LV_COLOR_MAKE(red, green, blue);
 
         lv_obj_t *tile = lv_obj_create(menu_overlay_);
         lv_obj_set_size(tile, 66, 50);
         lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_style_radius(tile, 12, LV_PART_MAIN);
-        lv_obj_set_style_border_width(tile, 0, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(tile, tile_color, LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_pad_all(tile, 2, LV_PART_MAIN);
-        lv_obj_set_style_pad_row(tile, 1, LV_PART_MAIN);
+        ui_theme::applyMenuTile(tile, tile_color);
         lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
@@ -284,13 +300,13 @@ void Kernel::ensureAppMenu()
         lv_obj_set_style_transition(tile, &trans_dsc, LV_PART_MAIN);
 
         lv_obj_t *icon = lv_label_create(tile);
+        ui_theme::applyText14(icon);
         lv_obj_set_style_text_color(icon, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
-        lv_obj_set_style_text_font(icon, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_label_set_text(icon, kIcons[i]);
 
         lv_obj_t *name = lv_label_create(tile);
+        ui_theme::applyText14(name);
         lv_obj_set_style_text_color(name, LV_COLOR_MAKE(236, 240, 248), LV_PART_MAIN);
-        lv_obj_set_style_text_font(name, &lv_font_montserrat_14, LV_PART_MAIN);
         lv_label_set_text(name, kNames[i]);
 
         menu_items_[i] = tile;
@@ -495,25 +511,21 @@ void Kernel::ensureStatusBar()
     status_bar_ = lv_obj_create(screen);
     lv_obj_set_size(status_bar_, board::CardputerBsp::kDisplayWidth, 16);
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_radius(status_bar_, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(status_bar_, 0, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(status_bar_, LV_COLOR_MAKE(22, 30, 46), LV_PART_MAIN);
-    lv_obj_set_style_pad_hor(status_bar_, 4, LV_PART_MAIN);
-    lv_obj_set_style_pad_ver(status_bar_, 0, LV_PART_MAIN);
+    ui_theme::applyPanel(status_bar_, LV_COLOR_MAKE(22, 30, 46), LV_COLOR_MAKE(22, 30, 46), 0, 4, 0, 0);
 
     status_left_ = lv_label_create(status_bar_);
+    ui_theme::applyText14(status_left_);
     lv_obj_set_style_text_color(status_left_, LV_COLOR_MAKE(240, 244, 252), LV_PART_MAIN);
-    lv_obj_set_style_text_font(status_left_, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_align(status_left_, LV_ALIGN_LEFT_MID, 0, 0);
 
     status_center_ = lv_label_create(status_bar_);
+    ui_theme::applyText14(status_center_);
     lv_obj_set_style_text_color(status_center_, LV_COLOR_MAKE(240, 244, 252), LV_PART_MAIN);
-    lv_obj_set_style_text_font(status_center_, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_align(status_center_, LV_ALIGN_CENTER, 0, 0);
 
     status_right_ = lv_label_create(status_bar_);
+    ui_theme::applyText14(status_right_);
     lv_obj_set_style_text_color(status_right_, LV_COLOR_MAKE(240, 244, 252), LV_PART_MAIN);
-    lv_obj_set_style_text_font(status_right_, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_align(status_right_, LV_ALIGN_RIGHT_MID, 0, 0);
 
     status_bar_ready_ = true;

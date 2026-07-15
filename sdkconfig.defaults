@@ -27,3 +27,8 @@ CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 # LVGL observer/data-binding is enabled by component defaults. Turn on object
 # property interface explicitly so UI can use property-based updates.
 CONFIG_LV_USE_OBJ_PROPERTY=y
+
+# Use Source Han Sans SC as the default built-in LVGL font set.
+CONFIG_LV_FONT_SOURCE_HAN_SANS_SC_14_CJK=y
+CONFIG_LV_FONT_SOURCE_HAN_SANS_SC_16_CJK=y
+CONFIG_LV_FONT_DEFAULT_SOURCE_HAN_SANS_SC_14_CJK=y

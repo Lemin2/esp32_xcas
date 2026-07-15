@@ -7,6 +7,10 @@
 #include <cstring>
 #include <limits>
 
+#include "brookesia/core/ui_theme.hpp"
+
+namespace ui_theme = brookesia::ui_theme;
+
 namespace brookesia {
 namespace {
 
@@ -120,23 +124,21 @@ void GraphApp::ensureUi()
     lv_obj_remove_style_all(root_);
     lv_obj_set_size(root_, kDisplayW, kRootH);
     lv_obj_align(root_, LV_ALIGN_TOP_LEFT, 0, kStatusH);
-    lv_obj_set_style_bg_color(root_, LV_COLOR_MAKE(11, 15, 24), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(root_, LV_OPA_COVER, LV_PART_MAIN);
+    ui_theme::applyPage(root_, LV_COLOR_MAKE(11, 15, 24));
     lv_obj_clear_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
 
     input_page_ = lv_obj_create(root_);
     lv_obj_remove_style_all(input_page_);
     lv_obj_set_size(input_page_, kDisplayW, kRootH);
     lv_obj_clear_flag(input_page_, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(input_page_, LV_COLOR_MAKE(16, 20, 30), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(input_page_, LV_OPA_COVER, LV_PART_MAIN);
+    ui_theme::applyPage(input_page_, LV_COLOR_MAKE(16, 20, 30));
     lv_obj_set_flex_flow(input_page_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(input_page_, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_row(input_page_, 3, LV_PART_MAIN);
 
     lv_obj_t *input_title = lv_label_create(input_page_);
     lv_label_set_text(input_title, "Functions");
-    lv_obj_set_style_text_font(input_title, &lv_font_montserrat_14, LV_PART_MAIN);
+    ui_theme::applyText16(input_title);
     lv_obj_set_style_text_color(input_title, LV_COLOR_MAKE(190, 205, 235), LV_PART_MAIN);
 
     input_list_ = lv_obj_create(input_page_);
@@ -152,11 +154,7 @@ void GraphApp::ensureUi()
         input_rows_[i] = row;
         lv_obj_set_width(row, kDisplayW - 8);
         lv_obj_set_height(row, 22);
-        lv_obj_set_style_pad_all(row, 2, LV_PART_MAIN);
-        lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
-        lv_obj_set_style_border_width(row, 1, LV_PART_MAIN);
-        lv_obj_set_style_border_color(row, LV_COLOR_MAKE(40, 55, 78), LV_PART_MAIN);
-        lv_obj_set_style_radius(row, 4, LV_PART_MAIN);
+        ui_theme::applyRowCard(row, LV_COLOR_MAKE(40, 55, 78), 4, 2, 2);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
@@ -170,12 +168,12 @@ void GraphApp::ensureUi()
 
         funcs_[i].color_label = lv_label_create(row);
         lv_label_set_text(funcs_[i].color_label, "■");
-        lv_obj_set_style_text_font(funcs_[i].color_label, &lv_font_montserrat_14, LV_PART_MAIN);
+        ui_theme::applyText14(funcs_[i].color_label);
         lv_obj_set_style_text_color(funcs_[i].color_label, funcs_[i].color, LV_PART_MAIN);
         lv_obj_set_width(funcs_[i].color_label, 18);
 
         funcs_[i].expr_label = lv_label_create(row);
-        lv_obj_set_style_text_font(funcs_[i].expr_label, &lv_font_montserrat_14, LV_PART_MAIN);
+        ui_theme::applyText14(funcs_[i].expr_label);
         lv_obj_set_style_text_color(funcs_[i].expr_label, LV_COLOR_MAKE(230, 236, 246), LV_PART_MAIN);
         lv_obj_set_style_pad_left(funcs_[i].expr_label, 2, LV_PART_MAIN);
         lv_label_set_long_mode(funcs_[i].expr_label, LV_LABEL_LONG_CLIP);
@@ -186,12 +184,11 @@ void GraphApp::ensureUi()
     lv_obj_remove_style_all(plot_page_);
     lv_obj_set_size(plot_page_, kDisplayW, kRootH);
     lv_obj_clear_flag(plot_page_, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(plot_page_, LV_COLOR_MAKE(8, 10, 18), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(plot_page_, LV_OPA_COVER, LV_PART_MAIN);
+    ui_theme::applyPage(plot_page_, LV_COLOR_MAKE(8, 10, 18));
 
     plot_title_ = lv_label_create(plot_page_);
     lv_obj_set_pos(plot_title_, 3, 1);
-    lv_obj_set_style_text_font(plot_title_, &lv_font_montserrat_14, LV_PART_MAIN);
+    ui_theme::applyText16(plot_title_);
     lv_obj_set_style_text_color(plot_title_, LV_COLOR_MAKE(170, 190, 220), LV_PART_MAIN);
     lv_label_set_text(plot_title_, "Plot");
 
@@ -199,8 +196,7 @@ void GraphApp::ensureUi()
     lv_obj_remove_style_all(plot_area_);
     lv_obj_set_pos(plot_area_, 0, 0);
     lv_obj_set_size(plot_area_, kDisplayW, kRootH);
-    lv_obj_set_style_bg_color(plot_area_, LV_COLOR_MAKE(8, 10, 18), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(plot_area_, LV_OPA_COVER, LV_PART_MAIN);
+    ui_theme::applyPage(plot_area_, LV_COLOR_MAKE(8, 10, 18));
     lv_obj_clear_flag(plot_area_, LV_OBJ_FLAG_SCROLLABLE);
 
     axis_x_ = lv_line_create(plot_area_);
@@ -219,8 +215,8 @@ void GraphApp::ensureUi()
         y_tick_lines_[i] = lv_line_create(plot_area_);
         x_tick_labels_[i] = lv_label_create(plot_area_);
         y_tick_labels_[i] = lv_label_create(plot_area_);
-        lv_obj_set_style_text_font(x_tick_labels_[i], &lv_font_montserrat_14, LV_PART_MAIN);
-        lv_obj_set_style_text_font(y_tick_labels_[i], &lv_font_montserrat_14, LV_PART_MAIN);
+        ui_theme::applyText14(x_tick_labels_[i]);
+        ui_theme::applyText14(y_tick_labels_[i]);
         lv_obj_set_style_text_color(x_tick_labels_[i], LV_COLOR_MAKE(130, 145, 170), LV_PART_MAIN);
         lv_obj_set_style_text_color(y_tick_labels_[i], LV_COLOR_MAKE(130, 145, 170), LV_PART_MAIN);
         lv_obj_set_style_line_color(x_tick_lines_[i], LV_COLOR_MAKE(45, 60, 82), LV_PART_MAIN);
@@ -243,32 +239,27 @@ void GraphApp::ensureUi()
     lv_obj_remove_style_all(table_page_);
     lv_obj_set_size(table_page_, kDisplayW, kRootH);
     lv_obj_clear_flag(table_page_, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_bg_color(table_page_, LV_COLOR_MAKE(14, 18, 28), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(table_page_, LV_OPA_COVER, LV_PART_MAIN);
+    ui_theme::applyPage(table_page_, LV_COLOR_MAKE(14, 18, 28));
     lv_obj_set_flex_flow(table_page_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(table_page_, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_row(table_page_, 2, LV_PART_MAIN);
 
     table_title_ = lv_label_create(table_page_);
     lv_label_set_text(table_title_, "Table");
-    lv_obj_set_style_text_font(table_title_, &lv_font_montserrat_14, LV_PART_MAIN);
+    ui_theme::applyText16(table_title_);
     lv_obj_set_style_text_color(table_title_, LV_COLOR_MAKE(190, 205, 235), LV_PART_MAIN);
 
     table_status_ = lv_label_create(table_page_);
-    lv_obj_set_style_text_font(table_status_, &lv_font_montserrat_14, LV_PART_MAIN);
+    ui_theme::applyText14(table_status_);
     lv_obj_set_style_text_color(table_status_, LV_COLOR_MAKE(140, 160, 190), LV_PART_MAIN);
     lv_label_set_text(table_status_, "Range 0..10  Step 0.1");
 
     table_obj_ = lv_table_create(table_page_);
     lv_obj_set_width(table_obj_, kDisplayW - 8);
     lv_obj_set_flex_grow(table_obj_, 1);
-    lv_obj_set_style_bg_color(table_obj_, LV_COLOR_MAKE(20, 26, 38), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(table_obj_, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(table_obj_, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_color(table_obj_, LV_COLOR_MAKE(44, 58, 82), LV_PART_MAIN);
-    lv_obj_set_style_text_font(table_obj_, &lv_font_montserrat_14, LV_PART_MAIN);
+    ui_theme::applyPanel(table_obj_, LV_COLOR_MAKE(20, 26, 38), LV_COLOR_MAKE(44, 58, 82));
+    ui_theme::applyText14(table_obj_);
     lv_obj_set_style_text_color(table_obj_, LV_COLOR_MAKE(230, 236, 246), LV_PART_MAIN);
-    lv_obj_set_style_pad_all(table_obj_, 2, LV_PART_MAIN);
 
     buildMenuOverlay();
     buildEntryOverlay();
@@ -286,12 +277,7 @@ void GraphApp::buildMenuOverlay()
     lv_obj_remove_style_all(menu_overlay_);
     lv_obj_set_size(menu_overlay_, 224, 112);
     lv_obj_align(menu_overlay_, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(menu_overlay_, LV_COLOR_MAKE(22, 28, 42), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(menu_overlay_, 10, LV_PART_MAIN);
-    lv_obj_set_style_border_width(menu_overlay_, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_color(menu_overlay_, LV_COLOR_MAKE(64, 80, 110), LV_PART_MAIN);
-    lv_obj_set_style_pad_all(menu_overlay_, 4, LV_PART_MAIN);
+    ui_theme::applyMenuOverlay(menu_overlay_, LV_COLOR_MAKE(22, 28, 42), LV_COLOR_MAKE(64, 80, 110));
     lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
 
@@ -307,7 +293,7 @@ void GraphApp::buildMenuOverlay()
     for (int i = 0; i < 8; ++i) {
         menu_rows_[i] = lv_list_add_btn(menu_list_, nullptr, "");
         lv_obj_set_width(menu_rows_[i], 206);
-        lv_obj_set_style_text_font(menu_rows_[i], &lv_font_montserrat_14, LV_PART_MAIN);
+        ui_theme::applyText14(menu_rows_[i]);
         lv_obj_set_style_text_color(menu_rows_[i], LV_COLOR_MAKE(220, 230, 245), LV_PART_MAIN);
         lv_obj_set_style_pad_left(menu_rows_[i], 4, LV_PART_MAIN);
         lv_obj_set_style_pad_right(menu_rows_[i], 4, LV_PART_MAIN);
@@ -322,25 +308,19 @@ void GraphApp::buildEntryOverlay()
     lv_obj_remove_style_all(entry_overlay_);
     lv_obj_set_size(entry_overlay_, 232, 54);
     lv_obj_align(entry_overlay_, LV_ALIGN_BOTTOM_MID, 0, -2);
-    lv_obj_set_style_bg_color(entry_overlay_, LV_COLOR_MAKE(18, 26, 42), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(entry_overlay_, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(entry_overlay_, 1, LV_PART_MAIN);
-    lv_obj_set_style_border_color(entry_overlay_, LV_COLOR_MAKE(64, 84, 116), LV_PART_MAIN);
-    lv_obj_set_style_radius(entry_overlay_, 8, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(entry_overlay_, 3, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(entry_overlay_, 3, LV_PART_MAIN);
+    ui_theme::applyPanel(entry_overlay_, LV_COLOR_MAKE(18, 26, 42), LV_COLOR_MAKE(64, 84, 116), 8, 3, 3);
     lv_obj_set_flex_flow(entry_overlay_, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(entry_overlay_, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(entry_overlay_, LV_OBJ_FLAG_HIDDEN);
 
     entry_title_ = lv_label_create(entry_overlay_);
-    lv_obj_set_style_text_font(entry_title_, &lv_font_montserrat_14, LV_PART_MAIN);
+    ui_theme::applyText16(entry_title_);
     lv_obj_set_style_text_color(entry_title_, LV_COLOR_MAKE(180, 200, 230), LV_PART_MAIN);
 
     entry_box_ = lv_textarea_create(entry_overlay_);
     lv_obj_set_size(entry_box_, 224, 24);
     lv_textarea_set_one_line(entry_box_, true);
-    lv_obj_set_style_text_font(entry_box_, &lv_font_montserrat_14, LV_PART_MAIN);
+    ui_theme::applyText14(entry_box_);
     lv_obj_set_style_text_color(entry_box_, LV_COLOR_MAKE(240, 242, 246), LV_PART_MAIN);
     lv_obj_set_style_bg_color(entry_box_, LV_COLOR_MAKE(28, 36, 52), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(entry_box_, LV_OPA_COVER, LV_PART_MAIN);
@@ -468,44 +448,6 @@ float GraphApp::niceStep(float range, int max_ticks) const
     return 10.0f * mag;
 }
 
-bool GraphApp::parseVectorResult(const std::string &result, std::vector<float> &out_values) const
-{
-    out_values.clear();
-    const char *p = result.c_str();
-    while (*p && *p != '[') ++p;
-    if (*p == '[') ++p;
-    while (*p) {
-        while (*p == ' ' || *p == '\t' || *p == '\n') ++p;
-        if (*p == '\0' || *p == ']') break;
-        float value = NAN;
-        if (std::strncmp(p, "undef", 5) == 0) {
-            p += 5;
-        } else if (std::strncmp(p, "inf", 3) == 0) {
-            value = INFINITY;
-            p += 3;
-        } else if (std::strncmp(p, "-inf", 4) == 0) {
-            value = -INFINITY;
-            p += 4;
-        } else if (std::strncmp(p, "+inf", 4) == 0) {
-            value = INFINITY;
-            p += 4;
-        } else {
-            char *end = nullptr;
-            value = std::strtof(p, &end);
-            if (end == p) {
-                while (*p && *p != ',' && *p != ']') ++p;
-                value = NAN;
-            } else {
-                p = end;
-            }
-        }
-        out_values.push_back(value);
-        while (*p && *p != ',' && *p != ']') ++p;
-        if (*p == ',') ++p;
-    }
-    return !out_values.empty();
-}
-
 void GraphApp::markPlotDirty()
 {
     ++generation_;
@@ -532,24 +474,24 @@ void GraphApp::submitEvaluation(EvalKind kind, int func_index)
         return;
     }
 
-    char expr[256];
+    const float dx_plot = (plot_x_max_ - plot_x_min_) / static_cast<float>(kPlotSamples - 1);
     if (kind == EvalKind::Plot) {
-        const float dx = (plot_x_max_ - plot_x_min_) / static_cast<float>(kPlotSamples - 1);
-        std::snprintf(expr, sizeof(expr), "seq(evalf(subst(%s,x,%.8f+k*%.8f)),k,0,%d)",
-            func.expr, static_cast<double>(plot_x_min_), static_cast<double>(dx), kPlotSamples - 1);
+        if (services_.casService().submitSampledReal(func.expr, plot_x_min_, dx_plot, kPlotSamples)) {
+            pending_kind_ = kind;
+            pending_func_ = func_index;
+            pending_generation_ = generation_;
+            eval_pending_ = true;
+        }
     } else {
         const float span = table_end_ - table_start_;
         const int rows = table_rows_ > 0 ? table_rows_ : 1;
         const float step = (rows > 1) ? span / static_cast<float>(rows - 1) : 0.0f;
-        std::snprintf(expr, sizeof(expr), "seq(evalf(subst(%s,x,%.8f+k*%.8f)),k,0,%d)",
-            func.expr, static_cast<double>(table_start_), static_cast<double>(step), rows - 1);
-    }
-
-    if (services_.casService().submit(expr)) {
-        pending_kind_ = kind;
-        pending_func_ = func_index;
-        pending_generation_ = generation_;
-        eval_pending_ = true;
+        if (services_.casService().submitSampledReal(func.expr, table_start_, step, rows)) {
+            pending_kind_ = kind;
+            pending_func_ = func_index;
+            pending_generation_ = generation_;
+            eval_pending_ = true;
+        }
     }
 }
 
@@ -599,16 +541,9 @@ void GraphApp::scheduleNextEvaluation()
     }
 }
 
-void GraphApp::onEvaluationResult(const std::string &result)
+void GraphApp::onEvaluationSamples(std::vector<float> values)
 {
     if (pending_generation_ != generation_) {
-        eval_pending_ = false;
-        pending_kind_ = EvalKind::None;
-        return;
-    }
-
-    std::vector<float> values;
-    if (!parseVectorResult(result, values)) {
         eval_pending_ = false;
         pending_kind_ = EvalKind::None;
         return;
@@ -1375,9 +1310,9 @@ void GraphApp::render()
     ensureUi();
     if (!ui_ready_) return;
 
-    std::string result;
-    if (services_.casService().pollResult(result)) {
-        onEvaluationResult(result);
+    std::vector<float> sampled;
+    if (services_.casService().pollSampledResult(sampled)) {
+        onEvaluationSamples(std::move(sampled));
     }
 
     scheduleNextEvaluation();

@@ -20,6 +20,8 @@ public:
     uint64_t scanKeyboardState();
     void handleKeyboardState(uint64_t pressedMask);
     void handleMappedKey(uint32_t key);
+    void debugSubmitFormula(const char *formula);
+    void requestScreenshot();
     void render();
 
 private:

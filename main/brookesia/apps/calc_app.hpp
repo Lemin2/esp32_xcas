@@ -17,6 +17,7 @@ public:
     void handleKeyboardState(uint64_t pressedMask) override;
     void handleMappedKey(uint32_t key) override;
     void render() override;
+    void debugSubmitFormula(const std::string &formula);
 
 private:
     xcas::XcasUi ui_;

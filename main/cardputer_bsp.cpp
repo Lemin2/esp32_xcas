@@ -1,5 +1,6 @@
 #include "cardputer_bsp.hpp"
 
+#include <cstring>
 #include <cstdint>
 #include <cstdio>
 
@@ -114,6 +115,16 @@ void CardputerBsp::initializeDisplay()
     ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_, 40, 52));
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, true));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
+    
+    if (screenshot_buf_ == nullptr) {
+        screenshot_buf_ = static_cast<uint16_t *>(heap_caps_malloc(
+            static_cast<size_t>(kDisplayWidth) * kDisplayHeight * sizeof(uint16_t), MALLOC_CAP_8BIT));
+        if (screenshot_buf_ != nullptr) {
+            std::memset(screenshot_buf_, 0, static_cast<size_t>(kDisplayWidth) * kDisplayHeight * sizeof(uint16_t));
+        } else {
+            ESP_LOGW(kTag, "screenshot shadow buffer allocation failed");
+        }
+    }
 }
 
 void CardputerBsp::initializeKeyboard()
@@ -195,19 +206,13 @@ void CardputerBsp::stashScreenshotRegion(int x1, int y1, int x2, int y2, const u
 
 bool CardputerBsp::beginScreenshotCapture()
 {
-    if (screenshot_buf_ == nullptr) {
-        screenshot_buf_ = static_cast<uint16_t *>(heap_caps_malloc(
-            static_cast<size_t>(kDisplayWidth) * kDisplayHeight * sizeof(uint16_t), MALLOC_CAP_8BIT));
-    }
     return screenshot_buf_ != nullptr;
 }
 
 void CardputerBsp::endScreenshotCapture()
 {
-    if (screenshot_buf_ != nullptr) {
-        heap_caps_free(screenshot_buf_);
-        screenshot_buf_ = nullptr;
-    }
+    // Keep the shadow buffer persistent to accumulate full-screen content
+    // across incremental LVGL flushes.
 }
 
 void CardputerBsp::emitScreenshot()

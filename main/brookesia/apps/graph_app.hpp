@@ -75,8 +75,7 @@ private:
     void markTableDirty();
     void scheduleNextEvaluation();
     void submitEvaluation(EvalKind kind, int func_index);
-    void onEvaluationResult(const std::string &result);
-    bool parseVectorResult(const std::string &result, std::vector<float> &out_values) const;
+    void onEvaluationSamples(std::vector<float> values);
     void updatePlotLimits();
     void rebuildPlotSegments(int func_index);
     void rebuildPlotTickLabels();

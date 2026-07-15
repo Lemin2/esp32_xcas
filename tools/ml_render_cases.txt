@@ -1,0 +1,50 @@
+# ML RENDER batch test cases
+# Lines starting with # are comments.
+
+# B1: atoms
+x
+123.45
+sin
+
+# B2: operators
+a+b
+x=1
+
+# B3: function calls
+sin(x)
+f(a,b)
+
+# C1: scripts
+x^2
+a_i
+x^(n+1)
+
+# C2: fractions
+1/2
+(a+b)/(c+d)
+
+# C3: sqrt
+sqrt(2)
+sqrt(1+x^2)
+
+# Nested
+1 + (a+b)/(c+d)
+sqrt((a+b)/(c+d))
+x^2 + 1/2
+
+# D1: sum / product
+sum(k^2, k, 1, n)
+sum(1/(k+1), k, 0, 10)
+product(k, k, 1, n)
+
+# D2: limit
+limit(sin(x)/x, x, 0)
+limit((1+1/x)^x, x, inf)
+
+# D3: matrix
+matrix([[1,2],[3,4]])
+matrix([[a,b,c],[d,e,f]])
+
+# D4: tall parens
+paren(1/2)
+paren((a+b)/(c+d))

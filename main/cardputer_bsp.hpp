@@ -24,10 +24,9 @@ public:
     void writeMidi(const uint8_t *data, std::size_t len);
     int readMidiByte(uint8_t *byte, TickType_t timeout);
 
-    // Screenshot support (debug aid). Call beginScreenshotCapture() to allocate
-    // a full-frame shadow buffer, force a full LVGL redraw, then emitScreenshot()
-    // to stream it over the serial console as base64 RGB565, then
-    // endScreenshotCapture() to release the buffer. Safe to call from the UI task.
+    // Screenshot support (debug aid). The shadow buffer is persistent and
+    // continuously updated from display flushes. begin/end are lightweight
+    // delimiters used by callers before/after emitScreenshot(). Safe on UI task.
     bool beginScreenshotCapture();
     void emitScreenshot();
     void endScreenshotCapture();

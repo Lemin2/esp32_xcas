@@ -36,4 +36,9 @@ void CalcApp::render()
     ui_.render();
 }
 
+void CalcApp::debugSubmitFormula(const std::string &formula)
+{
+    ui_.debugSubmitFormula(formula);
+}
+
 } // namespace brookesia

@@ -33,6 +33,7 @@ namespace xcas
         void render();
         void show();
         void hide();
+        void debugSubmitFormula(const std::string &formula);
 
     private:
         static constexpr int kFnRow = 2;
@@ -61,6 +62,12 @@ namespace xcas
         void moveHistorySelection(int delta);
         void selectHistoryIndex(int index, bool applyToInput);
         void submitInput();
+
+        static std::string trimCopy(const std::string &s);
+        static int findTopLevelChar(const std::string &s, char ch);
+        static bool hasOuterParens(const std::string &s);
+        static std::string renderNatural2D(const std::string &expr, int depth = 0);
+        static std::string centerText(const std::string &s, int width);
 
         // Autocomplete
         void updateAutocomplete();

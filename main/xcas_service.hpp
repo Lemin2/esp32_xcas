@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -16,12 +18,25 @@ public:
 
     bool start();
     bool submit(const char *expr);
+    bool submitSampledReal(const char *expr, float x0, float dx, int count);
     bool busy() const;
     bool pollResult(std::string &out);
+    bool pollSampledResult(std::vector<float> &out);
+
+    static std::string normalizeNaturalInput(const std::string &expr);
 
 private:
+    enum class JobType : uint8_t {
+        EvalExpr = 0,
+        SampledReal = 1,
+    };
+
     struct EvalJob {
+        JobType type = JobType::EvalExpr;
         char expr[192];
+        float x0 = 0.0f;
+        float dx = 0.0f;
+        uint16_t count = 0;
     };
 
     static void evalTaskEntry(void *ctx);
@@ -34,6 +49,8 @@ private:
     bool busy_;
     bool has_result_;
     std::string last_result_;
+    bool has_sampled_result_;
+    std::vector<float> last_sampled_result_;
 };
 
 } // namespace xcas

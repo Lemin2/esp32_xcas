@@ -41,6 +41,30 @@
 
 - 使用根目录脚本 `decode_shot.ps1` 将串口日志中的 `SHOT:` 行解码为 PNG。
 
+## 自动化公式截图测试
+
+设备端串口命令（新增）：
+
+- `ML SUBMIT <expr>`: 仅提交公式（不自动截图）
+- `ML SHOT`: 立即触发一次截图导出
+- `ML RUN <expr>`: 提交公式，等待渲染后自动截图
+- `ML HELP`: 打印命令帮助
+
+主机端批量测试脚本：
+
+- `tools/serial_mathlayout_capture.ps1`
+
+示例：
+
+- `powershell -ExecutionPolicy Bypass -File tools/serial_mathlayout_capture.ps1 -Port COM7 -Baud 460800`
+
+该脚本将：
+
+1. 从 `tools/mathlayout_formulas.txt` 读取公式。
+2. 逐条发送 `ML RUN <expr>` 到串口。
+3. 捕获 `SHOT_BEGIN/SHOT/SHOT_END` 到 `captures/*.txt`。
+4. 自动调用 `decode_shot.ps1` 生成 `captures/*.png`。
+
 ## 许可证判断
 
 ### 结论
