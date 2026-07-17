@@ -14,6 +14,7 @@
 #include "freertos/task.h"
 #include "esp_timer.h"
 
+#include "brookesia/apps/fs_util.hpp"
 #include "brookesia/core/ui_theme.hpp"
 #include "mathlayout/paint/math_painter.hpp"
 
@@ -366,7 +367,7 @@ namespace xcas
                    line[line.size() - 2] == ']' && line.back() == ']';
         }
 
-        std::string makeMatrixCanvasSource(const std::string &line)
+        std::string makeMatrixObjectSource(const std::string &line)
         {
             // Prefer native matrix parsing in mathlayout first.
             return std::string("matrix(") + line + ")";
@@ -387,7 +388,7 @@ namespace xcas
           history_list_(nullptr),
           editor_panel_(nullptr),
           editor_preview_host_(nullptr),
-          editor_preview_canvas_(nullptr),
+          editor_preview_formula_(nullptr),
           editor_preview_label_(nullptr),
           editor_hint_label_(nullptr),
           input_box_(nullptr),
@@ -708,7 +709,7 @@ namespace xcas
 
         editor_panel_ = nullptr;
         editor_preview_host_ = nullptr;
-        editor_preview_canvas_ = nullptr;
+        editor_preview_formula_ = nullptr;
         editor_preview_label_ = nullptr;
         editor_hint_label_ = nullptr;
 
@@ -763,7 +764,8 @@ namespace xcas
         lv_obj_set_size(editor_preview_host_, screen_w, screen_h - top_reserved);
         lv_obj_align(editor_preview_host_, LV_ALIGN_TOP_LEFT, 0, top_reserved);
         ui_theme::applyPage(editor_preview_host_, LV_COLOR_MAKE(8, 10, 14));
-        lv_obj_clear_flag(editor_preview_host_, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(editor_preview_host_, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scrollbar_mode(editor_preview_host_, LV_SCROLLBAR_MODE_AUTO);
         lv_obj_add_flag(editor_preview_host_, LV_OBJ_FLAG_HIDDEN);
 
         editor_hint_label_ = lv_label_create(editor_preview_host_);
@@ -772,14 +774,15 @@ namespace xcas
         lv_obj_align(editor_hint_label_, LV_ALIGN_TOP_MID, 0, 2);
         lv_label_set_text(editor_hint_label_, "Preview: Space/Esc exit, arrows pan");
 
-        editor_preview_canvas_ = lv_canvas_create(editor_preview_host_);
-        lv_obj_clear_flag(editor_preview_canvas_, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_flag(editor_preview_canvas_, LV_OBJ_FLAG_HIDDEN);
+        editor_preview_formula_ = lv_obj_create(editor_preview_host_);
+        lv_obj_remove_style_all(editor_preview_formula_);
+        lv_obj_clear_flag(editor_preview_formula_, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(editor_preview_formula_, LV_OBJ_FLAG_HIDDEN);
 
         editor_preview_label_ = lv_label_create(editor_preview_host_);
         brookesia::ui_theme::applyText14(editor_preview_label_);
         lv_obj_set_style_text_color(editor_preview_label_, LV_COLOR_MAKE(236, 240, 248), LV_PART_MAIN);
-        lv_obj_set_width(editor_preview_label_, LV_SIZE_CONTENT);
+        lv_obj_set_width(editor_preview_label_, screen_w - 8);
         lv_label_set_long_mode(editor_preview_label_, LV_LABEL_LONG_WRAP);
         lv_obj_add_flag(editor_preview_label_, LV_OBJ_FLAG_HIDDEN);
 
@@ -1352,8 +1355,7 @@ namespace xcas
 
         RenderBox sqrtBox(RenderBox inner)
         {
-            // C3: inline sqrt(inner) — avoids Unicode glyph dependency.
-            return makeTextBox("sqrt(" + flatBox(inner) + ")");
+            return makeTextBox(std::string(mathSymbol("√", "sqrt", 0x221A)) + "(" + flatBox(inner) + ")");
         }
 
         RenderBox matrixBox(const std::vector<std::vector<std::string>> &rows)
@@ -1609,7 +1611,7 @@ namespace xcas
                 const std::string var = trimCopy(args[1]);
                 const std::string lo = renderNatural2D(args[2], depth + 1);
                 const std::string hi = renderNatural2D(args[3], depth + 1);
-                return "sum_(" + var + "=" + lo + ")^(" + hi + ") " + body;
+                return std::string(mathSymbol("∑", "sum", 0x2211)) + "_(" + var + "=" + lo + ")^(" + hi + ") " + body;
             }
 
             if ((fn == "product" || fn == "prod") && args.size() >= 4) {
@@ -1617,7 +1619,7 @@ namespace xcas
                 const std::string var = trimCopy(args[1]);
                 const std::string lo = renderNatural2D(args[2], depth + 1);
                 const std::string hi = renderNatural2D(args[3], depth + 1);
-                return "prod_(" + var + "=" + lo + ")^(" + hi + ") " + body;
+                return std::string(mathSymbol("∏", "prod", 0x220F)) + "_(" + var + "=" + lo + ")^(" + hi + ") " + body;
             }
 
             if ((fn == "limit" || fn == "lim") && args.size() >= 3) {
@@ -1791,7 +1793,7 @@ namespace xcas
     {
         setEditorFullscreen(false);
         preview_line_.clear();
-        preview_use_canvas_ = false;
+        preview_use_objects_ = false;
         preview_paint_pending_ = false;
         preview_draw_list_ = {};
         preview_paint_state_ = {};
@@ -1811,14 +1813,14 @@ namespace xcas
         const int view_w = board::CardputerBsp::kDisplayWidth;
         const int view_h = board::CardputerBsp::kDisplayHeight - 16 - kTopInset;
 
-        lv_obj_t *obj = preview_use_canvas_ ? editor_preview_canvas_ : editor_preview_label_;
+        lv_obj_t *obj = preview_use_objects_ ? editor_preview_formula_ : editor_preview_label_;
         if (obj == nullptr || preview_content_w_ <= 0 || preview_content_h_ <= 0) {
             return;
         }
 
-        if (preview_use_canvas_) {
-            lv_obj_set_pos(editor_preview_canvas_, 0, kTopInset);
-            lv_obj_set_size(editor_preview_canvas_, view_w, view_h);
+        if (preview_use_objects_) {
+            lv_obj_set_pos(editor_preview_formula_, 0, kTopInset);
+            lv_obj_set_size(editor_preview_formula_, view_w, view_h);
             return;
         }
 
@@ -1843,7 +1845,7 @@ namespace xcas
 
     bool XcasUi::beginFullscreenPreviewPaint()
     {
-        if (!preview_use_canvas_ || editor_preview_canvas_ == nullptr) {
+        if (!preview_use_objects_ || editor_preview_formula_ == nullptr) {
             return false;
         }
 
@@ -1876,8 +1878,8 @@ namespace xcas
         viewport.width = view_w;
         viewport.height = view_h;
 
-        const bool begin_ok = mathlayout::beginProgressivePaintToCanvas(
-            editor_preview_canvas_,
+        const bool begin_ok = mathlayout::beginTileRenderToLvglObjects(
+            editor_preview_formula_,
             preview_draw_list_,
             LV_COLOR_MAKE(8, 10, 14),
             preview_paint_state_,
@@ -1898,14 +1900,14 @@ namespace xcas
 
     void XcasUi::stepFullscreenPreviewPaint(size_t max_commands, size_t max_line_commands)
     {
-        if (!preview_paint_pending_ || !preview_use_canvas_ || editor_preview_canvas_ == nullptr) {
+        if (!preview_paint_pending_ || !preview_use_objects_ || editor_preview_formula_ == nullptr) {
             return;
         }
 
         const lv_font_t *math_font = brookesia::ui_theme::textFont14();
         bool finished = false;
-        const bool step_ok = mathlayout::stepProgressivePaintToCanvas(
-            editor_preview_canvas_,
+        const bool step_ok = mathlayout::stepTileRenderToLvglObjects(
+            editor_preview_formula_,
             preview_draw_list_,
             math_font,
             LV_COLOR_MAKE(236, 240, 248),
@@ -1932,7 +1934,7 @@ namespace xcas
 
         preview_pan_x_ += dx;
         preview_pan_y_ += dy;
-        if (preview_use_canvas_) {
+        if (preview_use_objects_) {
             (void)beginFullscreenPreviewPaint();
         } else {
             updateFullscreenPreviewPosition();
@@ -1941,15 +1943,16 @@ namespace xcas
 
     void XcasUi::renderFullscreenPreview(const std::string &line)
     {
-        if (editor_preview_host_ == nullptr || editor_preview_canvas_ == nullptr) {
+        if (editor_preview_host_ == nullptr || editor_preview_formula_ == nullptr) {
             return;
         }
 
-        preview_use_canvas_ = false;
+        preview_use_objects_ = false;
         preview_content_w_ = 0;
         preview_content_h_ = 0;
 
-        lv_obj_add_flag(editor_preview_canvas_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(editor_preview_formula_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clean(editor_preview_formula_);
         if (editor_preview_label_ != nullptr) {
             lv_obj_add_flag(editor_preview_label_, LV_OBJ_FLAG_HIDDEN);
         }
@@ -1959,7 +1962,7 @@ namespace xcas
         std::vector<std::string> candidates;
         candidates.reserve(3);
         if (bracket_matrix) {
-            candidates.push_back(makeMatrixCanvasSource(line));
+            candidates.push_back(makeMatrixObjectSource(line));
             candidates.push_back(renderNatural2D(line));
             candidates.push_back(line);
         } else {
@@ -1969,16 +1972,16 @@ namespace xcas
 
         const int view_w = board::CardputerBsp::kDisplayWidth - 8;
         const int view_h = board::CardputerBsp::kDisplayHeight - 28;
-        const int max_canvas_area = 480000;
+        const int max_object_area = 480000;
         std::string fail_reason = "unknown";
         int fail_w = 0;
         int fail_h = 0;
         int fail_area = 0;
         size_t fail_candidate = 0;
-        for (const std::string &canvas_source : candidates) {
+        for (const std::string &object_source : candidates) {
             xcas::mathlayout::DrawList draw_list;
             try {
-                const xcas::mathlayout::TextBox box = xcas::mathlayout::renderText(canvas_source);
+                const xcas::mathlayout::TextBox box = xcas::mathlayout::renderText(object_source);
                 draw_list = xcas::mathlayout::buildDrawList(box, math_font);
             }
             catch (const std::bad_alloc &) {
@@ -2005,40 +2008,41 @@ namespace xcas
                 fail_reason = "invalid_area";
                 continue;
             }
-            if (area > max_canvas_area) {
+            if (area > max_object_area) {
                 fail_reason = "area_limit";
                 continue;
             }
 
-            const bool can_canvas =
+            const bool can_objects =
                 draw_list.width > 0 && draw_list.height > 0 &&
                 draw_list.width <= 4096 && draw_list.height <= 4096 &&
-                area > 0 && area <= max_canvas_area;
-            if (!can_canvas) {
+                area > 0 && area <= max_object_area;
+            if (!can_objects) {
                 fail_reason = "constraint_reject";
                 continue;
             }
 
             {
-                preview_use_canvas_ = true;
+                preview_use_objects_ = true;
                 preview_draw_list_ = std::move(draw_list);
                 preview_content_w_ = preview_draw_list_.width;
                 preview_content_h_ = preview_draw_list_.height;
-                lv_obj_clear_flag(editor_preview_canvas_, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clear_flag(editor_preview_formula_, LV_OBJ_FLAG_HIDDEN);
                 if (beginFullscreenPreviewPaint()) {
                     break;
                 }
-                preview_use_canvas_ = false;
+                preview_use_objects_ = false;
                 preview_draw_list_ = {};
                 preview_content_w_ = 0;
                 preview_content_h_ = 0;
-                lv_obj_add_flag(editor_preview_canvas_, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(editor_preview_formula_, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_clean(editor_preview_formula_);
                 fail_reason = "paint_init_failed";
                 continue;
             }
         }
 
-        if (!preview_use_canvas_) {
+        if (!preview_use_objects_) {
             const std::string fallback = renderNatural2D(line);
             lv_label_set_text(editor_preview_label_, fallback.c_str());
             lv_obj_clear_flag(editor_preview_label_, LV_OBJ_FLAG_HIDDEN);
@@ -2054,7 +2058,7 @@ namespace xcas
             char status[96];
             std::snprintf(status, sizeof(status), "Preview fallback: %s", fail_reason.c_str());
             setStatusText(status);
-            std::printf("ML_UI preview_canvas_fail reason=%s cand=%u w=%d h=%d area=%d\n",
+            std::printf("ML_UI preview_object_fail reason=%s cand=%u w=%d h=%d area=%d\n",
                         fail_reason.c_str(),
                         static_cast<unsigned>(fail_candidate),
                         fail_w,
@@ -2167,24 +2171,24 @@ namespace xcas
                 bubble_text = LV_COLOR_MAKE(255, 255, 255);
             }
 
-            bool used_canvas = false;
-            const bool allow_canvas =
+            bool used_formula_objects = false;
+            const bool allow_formula_objects =
                 is_math_output &&
                 !history_heavy_mode &&
                 (i == newest_index || is_selected);
-            if (allow_canvas) {
-                std::string canvas_source = line;
+            if (allow_formula_objects) {
+                std::string object_source = line;
                 if (is_bracket_matrix_line) {
                     size_t pos = 0;
-                    while ((pos = canvas_source.find("],[", pos)) != std::string::npos) {
-                        canvas_source.replace(pos, 3, "]\n[");
+                    while ((pos = object_source.find("],[", pos)) != std::string::npos) {
+                        object_source.replace(pos, 3, "]\n[");
                         pos += 3;
                     }
 
                     int depth = 0;
                     std::string wrapped;
-                    wrapped.reserve(canvas_source.size() + 16);
-                    for (char ch : canvas_source) {
+                    wrapped.reserve(object_source.size() + 16);
+                    for (char ch : object_source) {
                         if (ch == '[') {
                             ++depth;
                             wrapped.push_back(ch);
@@ -2202,26 +2206,27 @@ namespace xcas
                         }
                         wrapped.push_back(ch);
                     }
-                    canvas_source = std::move(wrapped);
+                    object_source = std::move(wrapped);
                 }
 
                 const lv_coord_t bubble_inner_max_w = bubble_max_w - 12;
-                const int max_canvas_area = 24000;
-                const size_t max_canvas_source_len = 256;
-                if (canvas_source.size() > max_canvas_source_len) {
-                    std::printf("ML_UI history_canvas_skip reason=source_too_long len=%u\n",
-                                static_cast<unsigned>(canvas_source.size()));
+                const int max_object_area = 24000;
+                const size_t max_object_source_len = 256;
+                const size_t max_object_commands = 768;
+                if (object_source.size() > max_object_source_len) {
+                    std::printf("ML_UI history_object_skip reason=source_too_long len=%u\n",
+                                static_cast<unsigned>(object_source.size()));
                     std::fflush(stdout);
                 } else {
                     try {
-                        const xcas::mathlayout::TextBox box = xcas::mathlayout::renderText(canvas_source);
+                        const xcas::mathlayout::TextBox box = xcas::mathlayout::renderText(object_source);
                         const lv_font_t *math_font = brookesia::ui_theme::textFont14();
                         xcas::mathlayout::DrawList draw_list = xcas::mathlayout::buildDrawList(box, math_font);
                         int area = draw_list.width * draw_list.height;
 
                         if (is_bracket_matrix_line) {
                             const bool over_limit =
-                                !(draw_list.width > 0 && draw_list.width <= bubble_inner_max_w && area > 0 && area <= max_canvas_area);
+                                !(draw_list.width > 0 && draw_list.width <= bubble_inner_max_w && area > 0 && area <= max_object_area);
                             if (over_limit) {
                                 const std::string compact_matrix = renderNatural2D(line);
                                 const xcas::mathlayout::TextBox compact_box = xcas::mathlayout::renderText(compact_matrix);
@@ -2229,18 +2234,23 @@ namespace xcas
                                 const int compact_area = compact_draw_list.width * compact_draw_list.height;
                                 const bool compact_ok =
                                     (compact_draw_list.width > 0 && compact_draw_list.width <= bubble_inner_max_w &&
-                                     compact_area > 0 && compact_area <= max_canvas_area);
+                                     compact_area > 0 && compact_area <= max_object_area);
                                 if (compact_ok) {
                                     draw_list = std::move(compact_draw_list);
                                     area = compact_area;
                                 }
                             }
                         }
-                        if (draw_list.width > 0 && draw_list.width <= bubble_inner_max_w && area > 0 && area <= max_canvas_area) {
-                            lv_obj_t *canvas = lv_canvas_create(bubble);
-                            lv_obj_clear_flag(canvas, LV_OBJ_FLAG_SCROLLABLE);
-                            used_canvas = xcas::mathlayout::paintDrawListToCanvas(
-                                canvas,
+                        if (draw_list.width > 0 &&
+                            draw_list.width <= bubble_inner_max_w &&
+                            area > 0 &&
+                            area <= max_object_area &&
+                            draw_list.commands.size() <= max_object_commands) {
+                            lv_obj_t *formula = lv_obj_create(bubble);
+                            lv_obj_remove_style_all(formula);
+                            lv_obj_clear_flag(formula, LV_OBJ_FLAG_SCROLLABLE);
+                            used_formula_objects = xcas::mathlayout::renderDrawListToLvglObjects(
+                                formula,
                                 draw_list,
                                 math_font,
                                 bubble_text,
@@ -2248,14 +2258,14 @@ namespace xcas
                         }
                     }
                     catch (const std::bad_alloc &) {
-                        std::printf("ML_UI history_canvas_skip reason=bad_alloc len=%u\n",
-                                    static_cast<unsigned>(canvas_source.size()));
+                        std::printf("ML_UI history_object_skip reason=bad_alloc len=%u\n",
+                                    static_cast<unsigned>(object_source.size()));
                         std::fflush(stdout);
                     }
                 }
             }
 
-            if (!used_canvas) {
+            if (!used_formula_objects) {
                 lv_obj_t *label = lv_label_create(bubble);
                 lv_obj_set_style_max_width(label, bubble_max_w - 12, LV_PART_MAIN);
                 lv_obj_set_width(label, LV_SIZE_CONTENT);
@@ -2545,7 +2555,7 @@ namespace xcas
     {
         initializeLvgl();
 
-        if (editor_fullscreen_ && preview_use_canvas_ && preview_paint_pending_) {
+        if (editor_fullscreen_ && preview_use_objects_ && preview_paint_pending_) {
             stepFullscreenPreviewPaint(96, 48);
         }
 
@@ -2581,6 +2591,10 @@ namespace xcas
     void XcasUi::show()
     {
         initializeLvgl();
+        if (!session_loaded_) {
+            loadSession();
+            session_loaded_ = true;
+        }
         if (root_ != nullptr) {
             lv_obj_clear_flag(root_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(root_);
@@ -2593,9 +2607,77 @@ namespace xcas
 
     void XcasUi::hide()
     {
+        saveSession();
         if (root_ != nullptr) {
             lv_obj_add_flag(root_, LV_OBJ_FLAG_HIDDEN);
         }
+    }
+
+    void XcasUi::loadSession()
+    {
+        if (!brookesia::ensureStorageMounted()) {
+            return;
+        }
+
+        FILE *f = std::fopen("/data/calc_session.txt", "r");
+        if (f == nullptr) {
+            return;
+        }
+
+        history_lines_.clear();
+
+        char line[256];
+        while (std::fgets(line, sizeof(line), f) != nullptr) {
+            size_t n = std::strlen(line);
+            while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) {
+                line[n - 1] = '\0';
+                --n;
+            }
+
+            if (std::strncmp(line, "INPUT=", 6) == 0) {
+                if (input_box_ != nullptr) {
+                    lv_textarea_set_text(input_box_, line + 6);
+                }
+                continue;
+            }
+
+            if (std::strncmp(line, "H=", 2) == 0) {
+                history_lines_.emplace_back(line + 2);
+            }
+        }
+        std::fclose(f);
+
+        if (history_lines_.empty()) {
+            history_lines_.push_back("CAS ready. Enter to eval.");
+        }
+
+        selected_history_index_ = -1;
+        refreshHistoryList();
+    }
+
+    void XcasUi::saveSession()
+    {
+        if (!brookesia::ensureStorageMounted()) {
+            return;
+        }
+
+        FILE *f = std::fopen("/data/calc_session.txt", "w");
+        if (f == nullptr) {
+            return;
+        }
+
+        if (input_box_ != nullptr) {
+            const char *input = lv_textarea_get_text(input_box_);
+            std::fprintf(f, "INPUT=%s\n", input == nullptr ? "" : input);
+        } else {
+            std::fputs("INPUT=\n", f);
+        }
+
+        for (const std::string &line : history_lines_) {
+            std::fprintf(f, "H=%s\n", line.c_str());
+        }
+
+        std::fclose(f);
     }
 
     // ── Autocomplete ────────────────────────────────────────────────────────

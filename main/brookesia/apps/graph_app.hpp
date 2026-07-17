@@ -20,6 +20,7 @@ public:
     void onFocus() override;
     void onBlur() override;
     void handleKeyboardState(uint64_t pressedMask) override;
+    void handleMappedKey(uint32_t key) override;
     void render() override;
 
 private:
@@ -37,7 +38,16 @@ private:
 
     enum class Page { Input, Plot, Table };
     enum class MenuKind { None, PageInput, PagePlot, PageTable };
-    enum class EntryKind { None, FunctionExpr, TableStart, TableEnd, TableStep };
+    enum class EntryKind {
+        None,
+        FunctionExpr,
+        TableStart,
+        TableEnd,
+        TableStep,
+        ScaleFactor,
+        ScaleXFactor,
+        ScaleYFactor,
+    };
     enum class EvalKind { None, Plot, Table };
 
     struct PlotFunc {
@@ -62,6 +72,8 @@ private:
     };
 
     void ensureUi();
+    void loadSession();
+    void saveSession() const;
     void showPage(Page page);
     void refreshPageVisibility();
     void buildInputPage();
@@ -73,6 +85,12 @@ private:
     void addDefaultFunctions();
     void markPlotDirty();
     void markTableDirty();
+    void resetPlotView();
+    void normalizePlotAspect();
+    void applyUniformScale(float factor);
+    void applyAxisScale(float factor, bool scale_x);
+    void startRegionZoom();
+    void finishRegionZoom();
     void scheduleNextEvaluation();
     void submitEvaluation(EvalKind kind, int func_index);
     void onEvaluationSamples(std::vector<float> values);
@@ -86,6 +104,9 @@ private:
     void updateTablePage();
     void updateMenuOverlay();
     void updateEntryOverlay();
+    void activateMenuItem(int index);
+    void buildMenuItems();
+    static void onMenuButtonEvent(lv_event_t *e);
 
     void openMenu(MenuKind kind);
     void closeMenu();
@@ -109,13 +130,14 @@ private:
     void handleInputPageInput(uint64_t newly, uint64_t current_mask);
     void handlePlotPageInput(uint64_t newly, uint64_t current_mask);
     void handleTablePageInput(uint64_t newly, uint64_t current_mask);
+    void openPageMenu();
 
     ServiceHub &services_;
 
     Page page_ = Page::Input;
     bool menu_open_ = false;
     MenuKind menu_kind_ = MenuKind::None;
-    int menu_index_ = 0;
+    lv_group_t *menu_group_ = nullptr;
 
     EntryKind entry_kind_ = EntryKind::None;
     int entry_func_index_ = -1;
@@ -127,6 +149,10 @@ private:
     int active_plot_func_ = 0;
     int cursor_sample_ = kPlotSamples / 2;
     bool cursor_mode_ = false;
+    bool plot_equal_scale_ = true;
+    bool region_zoom_active_ = false;
+    bool region_zoom_anchor_set_ = false;
+    int region_zoom_anchor_sample_ = 0;
 
     float plot_x_min_ = -6.0f;
     float plot_x_max_ = 6.0f;
@@ -142,6 +168,7 @@ private:
     bool table_dirty_ = true;
     bool table_rebuild_pending_ = false;
     int table_rebuild_row_ = 0;
+    int table_rebuild_col_ = 0;
 
     EvalKind pending_kind_ = EvalKind::None;
     int pending_func_ = -1;
@@ -187,11 +214,11 @@ private:
     std::array<char, 128> entry_prev_buf_{};
 
     uint64_t prev_mask_ = 0;
+    bool session_loaded_ = false;
     bool ui_ready_ = false;
 
-    MenuItem menu_items_[8]{};
-    int menu_count_ = 0;
-    lv_obj_t *menu_rows_[8] = {};
+    std::vector<MenuItem> menu_items_;
+    std::vector<lv_obj_t *> menu_rows_;
 };
 
 } // namespace brookesia

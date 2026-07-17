@@ -11,6 +11,7 @@ set(XCAS_GUI_SRCS
     "fonts/lv_font_noto_math_14.c"
     "fonts/lv_font_symbols_14.c"
     "brookesia/core/kernel.cpp"
+    "brookesia/core/app_settings.cpp"
     "brookesia/core/ui_theme.cpp"
     "brookesia/apps/calc_app.cpp"
     "brookesia/apps/graph_app.cpp"
@@ -35,8 +36,14 @@ set(XCAS_PRIV_REQUIRES
     esp_driver_spi
     esp_driver_uart
     esp_driver_gpio
+    esp_driver_sdmmc
     esp_timer
-    fatfs)
+    fatfs
+    littlefs
+    esp_event
+    esp_netif
+    esp_wifi
+    bt)
 
 if(XCAS_ENABLE_CONSOLE_MAIN)
     list(APPEND XCAS_SRCS ${XCAS_CONSOLE_SRCS})

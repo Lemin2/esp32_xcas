@@ -67,11 +67,11 @@ void PlaceholderApp::ensureUi()
 
     hint_label_ = lv_label_create(screen);
     lv_obj_set_width(hint_label_, 220);
-    lv_label_set_long_mode(hint_label_, LV_LABEL_LONG_WRAP);
+    lv_label_set_long_mode(hint_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     ui_theme::applyText14(hint_label_);
     lv_obj_set_style_text_color(hint_label_, LV_COLOR_MAKE(88, 104, 122), LV_PART_MAIN);
     lv_obj_align(hint_label_, LV_ALIGN_TOP_LEFT, 8, 64);
-    lv_label_set_text(hint_label_, "This page is scaffolded in brookesia.\nFn+Q/W switch apps.\nImplementation is next batch.");
+    lv_label_set_text(hint_label_, "This page is scaffolded in brookesia.\nUse Opt to open app menu.\nImplementation is next batch.");
 
     ui_ready_ = true;
 }

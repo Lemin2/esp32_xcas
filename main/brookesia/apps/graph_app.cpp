@@ -7,7 +7,10 @@
 #include <cstring>
 #include <limits>
 
+#include "esp_timer.h"
+
 #include "brookesia/core/ui_theme.hpp"
+#include "brookesia/apps/fs_util.hpp"
 
 namespace ui_theme = brookesia::ui_theme;
 
@@ -60,6 +63,11 @@ const char *const kMenuPlotLabels[] = {
     "Reset view",
     "Zoom in",
     "Zoom out",
+    "Scale x",
+    "Scale y",
+    "Scale factor",
+    "Region zoom",
+    "Equal scale on/off",
 };
 
 const char *const kMenuTableLabels[] = {
@@ -176,7 +184,7 @@ void GraphApp::ensureUi()
         ui_theme::applyText14(funcs_[i].expr_label);
         lv_obj_set_style_text_color(funcs_[i].expr_label, LV_COLOR_MAKE(230, 236, 246), LV_PART_MAIN);
         lv_obj_set_style_pad_left(funcs_[i].expr_label, 2, LV_PART_MAIN);
-        lv_label_set_long_mode(funcs_[i].expr_label, LV_LABEL_LONG_CLIP);
+        lv_label_set_long_mode(funcs_[i].expr_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_obj_set_width(funcs_[i].expr_label, kDisplayW - 40);
     }
 
@@ -289,17 +297,8 @@ void GraphApp::buildMenuOverlay()
     lv_obj_set_style_border_width(menu_list_, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(menu_list_, 2, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(menu_list_, LV_SCROLLBAR_MODE_AUTO);
-
-    for (int i = 0; i < 8; ++i) {
-        menu_rows_[i] = lv_list_add_btn(menu_list_, nullptr, "");
-        lv_obj_set_width(menu_rows_[i], 206);
-        ui_theme::applyText14(menu_rows_[i]);
-        lv_obj_set_style_text_color(menu_rows_[i], LV_COLOR_MAKE(220, 230, 245), LV_PART_MAIN);
-        lv_obj_set_style_pad_left(menu_rows_[i], 4, LV_PART_MAIN);
-        lv_obj_set_style_pad_right(menu_rows_[i], 4, LV_PART_MAIN);
-        lv_obj_set_style_pad_top(menu_rows_[i], 1, LV_PART_MAIN);
-        lv_obj_set_style_pad_bottom(menu_rows_[i], 1, LV_PART_MAIN);
-    }
+    menu_items_.clear();
+    menu_rows_.clear();
 }
 
 void GraphApp::buildEntryOverlay()
@@ -348,20 +347,35 @@ void GraphApp::showPage(Page page)
 {
     page_ = page;
     cursor_mode_ = false;
+    region_zoom_active_ = false;
+    region_zoom_anchor_set_ = false;
     closeMenu();
     if (entry_overlay_) lv_obj_add_flag(entry_overlay_, LV_OBJ_FLAG_HIDDEN);
     refreshPageVisibility();
     if (page_ == Page::Input) updateInputPage();
     if (page_ == Page::Plot) updatePlotPage();
-    if (page_ == Page::Table) updateTablePage();
+    if (page_ == Page::Table) {
+        updateTablePage();
+        if (!table_dirty_ && !eval_pending_ && !table_rebuild_pending_) {
+            beginTableRebuild();
+        }
+    }
 }
 
 void GraphApp::onFocus()
 {
+    if (!session_loaded_) {
+        loadSession();
+        session_loaded_ = true;
+    }
+
     ensureUi();
     if (root_) {
         lv_obj_clear_flag(root_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(root_);
+    }
+    if (plot_equal_scale_) {
+        normalizePlotAspect();
     }
     markPlotDirty();
     markTableDirty();
@@ -372,9 +386,84 @@ void GraphApp::onFocus()
 
 void GraphApp::onBlur()
 {
+    saveSession();
     if (root_) {
         lv_obj_add_flag(root_, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+void GraphApp::loadSession()
+{
+    if (!ensureStorageMounted()) {
+        return;
+    }
+
+    FILE *f = std::fopen("/data/graph_session.txt", "r");
+    if (f == nullptr) {
+        return;
+    }
+
+    char line[256];
+    while (std::fgets(line, sizeof(line), f) != nullptr) {
+        size_t n = std::strlen(line);
+        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) {
+            line[n - 1] = '\0';
+            --n;
+        }
+
+        if (std::strncmp(line, "plot_x_min=", 11) == 0) {
+            plot_x_min_ = std::strtof(line + 11, nullptr);
+        } else if (std::strncmp(line, "plot_x_max=", 11) == 0) {
+            plot_x_max_ = std::strtof(line + 11, nullptr);
+        } else if (std::strncmp(line, "plot_y_min=", 11) == 0) {
+            plot_y_min_ = std::strtof(line + 11, nullptr);
+        } else if (std::strncmp(line, "plot_y_max=", 11) == 0) {
+            plot_y_max_ = std::strtof(line + 11, nullptr);
+        } else if (std::strncmp(line, "table_start=", 12) == 0) {
+            table_start_ = std::strtof(line + 12, nullptr);
+        } else if (std::strncmp(line, "table_end=", 10) == 0) {
+            table_end_ = std::strtof(line + 10, nullptr);
+        } else if (std::strncmp(line, "table_step=", 11) == 0) {
+            table_step_ = std::strtof(line + 11, nullptr);
+        } else if (std::strncmp(line, "f", 1) == 0) {
+            int idx = -1;
+            int enabled = 0;
+            char expr[kMaxExprLen] = {};
+            if (std::sscanf(line, "f%d=%d|%95[^\n]", &idx, &enabled, expr) == 3) {
+                if (idx >= 0 && idx < kMaxFuncs) {
+                    funcs_[idx].enabled = (enabled != 0);
+                    std::snprintf(funcs_[idx].expr, sizeof(funcs_[idx].expr), "%s", expr);
+                }
+            }
+        }
+    }
+
+    std::fclose(f);
+}
+
+void GraphApp::saveSession() const
+{
+    if (!ensureStorageMounted()) {
+        return;
+    }
+
+    FILE *f = std::fopen("/data/graph_session.txt", "w");
+    if (f == nullptr) {
+        return;
+    }
+
+    std::fprintf(f, "plot_x_min=%g\n", static_cast<double>(plot_x_min_));
+    std::fprintf(f, "plot_x_max=%g\n", static_cast<double>(plot_x_max_));
+    std::fprintf(f, "plot_y_min=%g\n", static_cast<double>(plot_y_min_));
+    std::fprintf(f, "plot_y_max=%g\n", static_cast<double>(plot_y_max_));
+    std::fprintf(f, "table_start=%g\n", static_cast<double>(table_start_));
+    std::fprintf(f, "table_end=%g\n", static_cast<double>(table_end_));
+    std::fprintf(f, "table_step=%g\n", static_cast<double>(table_step_));
+    for (int i = 0; i < kMaxFuncs; ++i) {
+        std::fprintf(f, "f%d=%d|%s\n", i, funcs_[i].enabled ? 1 : 0, funcs_[i].expr);
+    }
+
+    std::fclose(f);
 }
 
 float GraphApp::parseEntryValue(const char *text, float fallback) const
@@ -466,6 +555,138 @@ void GraphApp::markTableDirty()
     }
 }
 
+void GraphApp::resetPlotView()
+{
+    plot_x_min_ = -6.0f;
+    plot_x_max_ = 6.0f;
+    plot_y_min_ = -4.0f;
+    plot_y_max_ = 4.0f;
+    plot_equal_scale_ = true;
+    region_zoom_active_ = false;
+    region_zoom_anchor_set_ = false;
+    markPlotDirty();
+}
+
+void GraphApp::normalizePlotAspect()
+{
+    const float x_span = plot_x_max_ - plot_x_min_;
+    const float y_span = plot_y_max_ - plot_y_min_;
+    if (!(x_span > 0.0f) || !(y_span > 0.0f)) {
+        return;
+    }
+
+    const float plot_aspect = static_cast<float>(kDisplayW) / static_cast<float>(kRootH);
+    const float current_aspect = x_span / y_span;
+    const float cx = (plot_x_min_ + plot_x_max_) * 0.5f;
+    const float cy = (plot_y_min_ + plot_y_max_) * 0.5f;
+
+    if (current_aspect > plot_aspect) {
+        const float half = x_span * 0.5f;
+        const float new_half_y = half / plot_aspect;
+        plot_x_min_ = cx - half;
+        plot_x_max_ = cx + half;
+        plot_y_min_ = cy - new_half_y;
+        plot_y_max_ = cy + new_half_y;
+    } else {
+        const float half = y_span * 0.5f;
+        const float new_half_x = half * plot_aspect;
+        plot_x_min_ = cx - new_half_x;
+        plot_x_max_ = cx + new_half_x;
+        plot_y_min_ = cy - half;
+        plot_y_max_ = cy + half;
+    }
+}
+
+void GraphApp::applyUniformScale(float factor)
+{
+    if (!(factor > 0.0f)) {
+        return;
+    }
+
+    const float cx = (plot_x_min_ + plot_x_max_) * 0.5f;
+    const float cy = (plot_y_min_ + plot_y_max_) * 0.5f;
+    const float half_x = (plot_x_max_ - plot_x_min_) * 0.5f * factor;
+    const float half_y = (plot_y_max_ - plot_y_min_) * 0.5f * factor;
+    plot_x_min_ = cx - half_x;
+    plot_x_max_ = cx + half_x;
+    plot_y_min_ = cy - half_y;
+    plot_y_max_ = cy + half_y;
+    if (plot_equal_scale_) {
+        normalizePlotAspect();
+    }
+    markPlotDirty();
+}
+
+void GraphApp::applyAxisScale(float factor, bool scale_x)
+{
+    if (!(factor > 0.0f)) {
+        return;
+    }
+
+    const float cx = (plot_x_min_ + plot_x_max_) * 0.5f;
+    const float cy = (plot_y_min_ + plot_y_max_) * 0.5f;
+    plot_equal_scale_ = false;
+    if (scale_x) {
+        const float half_x = (plot_x_max_ - plot_x_min_) * 0.5f * factor;
+        plot_x_min_ = cx - half_x;
+        plot_x_max_ = cx + half_x;
+    } else {
+        const float half_y = (plot_y_max_ - plot_y_min_) * 0.5f * factor;
+        plot_y_min_ = cy - half_y;
+        plot_y_max_ = cy + half_y;
+    }
+    markPlotDirty();
+}
+
+void GraphApp::startRegionZoom()
+{
+    region_zoom_active_ = true;
+    region_zoom_anchor_set_ = false;
+    region_zoom_anchor_sample_ = cursor_sample_;
+    cursor_mode_ = true;
+}
+
+void GraphApp::finishRegionZoom()
+{
+    if (!region_zoom_active_) {
+        return;
+    }
+
+    const int left = std::min(region_zoom_anchor_sample_, cursor_sample_);
+    const int right = std::max(region_zoom_anchor_sample_, cursor_sample_);
+    if (right <= left) {
+        region_zoom_active_ = false;
+        region_zoom_anchor_set_ = false;
+        return;
+    }
+
+    const float x0 = plotXAt(left);
+    const float x1 = plotXAt(right);
+    const float x_span = std::max(0.0001f, x1 - x0);
+    const float y_center = (plot_y_min_ + plot_y_max_) * 0.5f;
+    const float y_span = plot_y_max_ - plot_y_min_;
+
+    plot_x_min_ = x0;
+    plot_x_max_ = x1;
+
+    if (plot_equal_scale_) {
+        const float plot_aspect = static_cast<float>(kDisplayW) / static_cast<float>(kRootH);
+        const float half_x = x_span * 0.5f;
+        const float new_half_y = half_x / plot_aspect;
+        plot_y_min_ = y_center - new_half_y;
+        plot_y_max_ = y_center + new_half_y;
+    } else {
+        const float half_y = y_span * 0.5f;
+        plot_y_min_ = y_center - half_y;
+        plot_y_max_ = y_center + half_y;
+    }
+
+    region_zoom_active_ = false;
+    region_zoom_anchor_set_ = false;
+    cursor_mode_ = false;
+    markPlotDirty();
+}
+
 void GraphApp::submitEvaluation(EvalKind kind, int func_index)
 {
     if (func_index < 0 || func_index >= kMaxFuncs) return;
@@ -527,17 +748,19 @@ void GraphApp::scheduleNextEvaluation()
             }
         }
         table_dirty_ = false;
-        beginTableRebuild();
         updateTablePage();
+        if (page_ == Page::Table) {
+            beginTableRebuild();
+        }
     }
 
     if (table_rebuild_pending_) {
-        // Keep menu/input interaction responsive: avoid heavy table writes while overlay is open.
-        if (menu_open_) {
+        // Only touch LVGL table when the table page is visible, and keep each frame tiny.
+        if (page_ != Page::Table || menu_open_ || entry_kind_ != EntryKind::None) {
             return;
         }
-        constexpr int kRowsPerFrame = 6;
-        table_rebuild_pending_ = !rebuildTableChunk(kRowsPerFrame);
+        constexpr int kCellsPerFrame = 2;
+        table_rebuild_pending_ = !rebuildTableChunk(kCellsPerFrame);
     }
 }
 
@@ -573,29 +796,17 @@ void GraphApp::onEvaluationSamples(std::vector<float> values)
 
 void GraphApp::updatePlotLimits()
 {
-    float y_min = std::numeric_limits<float>::infinity();
-    float y_max = -std::numeric_limits<float>::infinity();
-
-    for (const auto &func : funcs_) {
-        if (!func.enabled || func.plot_values.empty()) {
-            continue;
-        }
-        for (float value : func.plot_values) {
-            if (std::isfinite(value)) {
-                y_min = std::min(y_min, value);
-                y_max = std::max(y_max, value);
-            }
-        }
+    if (!(plot_x_max_ > plot_x_min_)) {
+        plot_x_min_ = -6.0f;
+        plot_x_max_ = 6.0f;
     }
-
-    if (!(y_min < y_max) || !std::isfinite(y_min) || !std::isfinite(y_max)) {
+    if (!(plot_y_max_ > plot_y_min_)) {
         plot_y_min_ = -4.0f;
         plot_y_max_ = 4.0f;
-    } else {
-        const float span = y_max - y_min;
-        const float pad = std::max(0.5f, span * 0.12f);
-        plot_y_min_ = y_min - pad;
-        plot_y_max_ = y_max + pad;
+    }
+
+    if (plot_equal_scale_) {
+        normalizePlotAspect();
     }
 }
 
@@ -794,49 +1005,63 @@ void GraphApp::beginTableRebuild()
     }
 
     table_rebuild_row_ = 0;
+    table_rebuild_col_ = 0;
     table_rebuild_pending_ = true;
 }
 
-bool GraphApp::rebuildTableChunk(int max_rows)
+bool GraphApp::rebuildTableChunk(int max_cells)
 {
     if (table_obj_ == nullptr) {
         return true;
     }
-    if (max_rows <= 0) {
-        max_rows = 1;
+    if (max_cells <= 0) {
+        max_cells = 1;
     }
 
-    int written = 0;
-    while (table_rebuild_row_ < table_rows_ && written < max_rows) {
-        const int row = table_rebuild_row_;
-        const float x = (table_rows_ <= 1)
-                            ? table_start_
-                            : (table_start_ + static_cast<float>(row) * (table_end_ - table_start_) /
-                                                  static_cast<float>(table_rows_ - 1));
-        char cell[32];
-        std::snprintf(cell, sizeof(cell), "%.6g", static_cast<double>(x));
-        lv_table_set_cell_value(table_obj_, static_cast<uint16_t>(row + 1), 0, cell);
+    const uint64_t start_us = static_cast<uint64_t>(esp_timer_get_time());
+    constexpr uint64_t kBudgetUs = 1200;
 
-        for (int i = 0; i < kMaxFuncs; ++i) {
-            if (!funcs_[i].enabled) {
-                lv_table_set_cell_value(table_obj_, static_cast<uint16_t>(row + 1), static_cast<uint16_t>(i + 1), "--");
-                continue;
+    int written = 0;
+    while (table_rebuild_row_ < table_rows_ && written < max_cells) {
+        const int row = table_rebuild_row_;
+        char cell[32];
+        const int col = table_rebuild_col_;
+        if (col == 0) {
+            const float x = (table_rows_ <= 1)
+                                ? table_start_
+                                : (table_start_ + static_cast<float>(row) * (table_end_ - table_start_) /
+                                                      static_cast<float>(table_rows_ - 1));
+            std::snprintf(cell, sizeof(cell), "%.6g", static_cast<double>(x));
+            lv_table_set_cell_value(table_obj_, static_cast<uint16_t>(row + 1), 0, cell);
+        } else {
+            const int func_index = col - 1;
+            if (func_index >= 0 && func_index < kMaxFuncs) {
+                if (!funcs_[func_index].enabled) {
+                    lv_table_set_cell_value(table_obj_, static_cast<uint16_t>(row + 1), static_cast<uint16_t>(col), "--");
+                } else {
+                    const auto &values = funcs_[func_index].table_values;
+                    const char *text = "undef";
+                    if (row < static_cast<int>(values.size()) && std::isfinite(values[row])) {
+                        std::snprintf(cell, sizeof(cell), "%.6g", static_cast<double>(values[row]));
+                        text = cell;
+                    } else if (row < static_cast<int>(values.size()) && std::isinf(values[row])) {
+                        text = values[row] > 0 ? "inf" : "-inf";
+                    }
+                    lv_table_set_cell_value(table_obj_, static_cast<uint16_t>(row + 1), static_cast<uint16_t>(col), text);
+                }
             }
-            const auto &values = funcs_[i].table_values;
-            const char *text = "";
-            if (row < static_cast<int>(values.size()) && std::isfinite(values[row])) {
-                std::snprintf(cell, sizeof(cell), "%.6g", static_cast<double>(values[row]));
-                text = cell;
-            } else if (row < static_cast<int>(values.size()) && std::isinf(values[row])) {
-                text = values[row] > 0 ? "inf" : "-inf";
-            } else {
-                text = "undef";
-            }
-            lv_table_set_cell_value(table_obj_, static_cast<uint16_t>(row + 1), static_cast<uint16_t>(i + 1), text);
         }
 
-        ++table_rebuild_row_;
         ++written;
+        ++table_rebuild_col_;
+        if (table_rebuild_col_ > kMaxFuncs) {
+            table_rebuild_col_ = 0;
+            ++table_rebuild_row_;
+        }
+
+        if ((static_cast<uint64_t>(esp_timer_get_time()) - start_us) >= kBudgetUs) {
+            break;
+        }
     }
 
     return table_rebuild_row_ >= table_rows_;
@@ -879,6 +1104,91 @@ void GraphApp::updatePlotPage()
     lv_label_set_text(plot_title_, buf);
 }
 
+void GraphApp::buildMenuItems()
+{
+    menu_items_.clear();
+    switch (menu_kind_) {
+    case MenuKind::PageInput:
+        menu_items_.push_back({"Plot page", MenuKind::PageInput, 0});
+        menu_items_.push_back({"Table page", MenuKind::PageInput, 1});
+        menu_items_.push_back({"Edit function", MenuKind::PageInput, 2});
+        menu_items_.push_back({"Toggle function", MenuKind::PageInput, 3});
+        menu_items_.push_back({"Cycle color", MenuKind::PageInput, 4});
+        menu_items_.push_back({"Reset function", MenuKind::PageInput, 5});
+        break;
+    case MenuKind::PagePlot:
+        menu_items_.push_back({"Input page", MenuKind::PagePlot, 0});
+        menu_items_.push_back({"Table page", MenuKind::PagePlot, 1});
+        menu_items_.push_back({"Cursor on/off", MenuKind::PagePlot, 2});
+        menu_items_.push_back({"Reset view", MenuKind::PagePlot, 3});
+        menu_items_.push_back({"Zoom in", MenuKind::PagePlot, 4});
+        menu_items_.push_back({"Zoom out", MenuKind::PagePlot, 5});
+        menu_items_.push_back({"Scale x", MenuKind::PagePlot, 6});
+        menu_items_.push_back({"Scale y", MenuKind::PagePlot, 7});
+        menu_items_.push_back({"Scale factor", MenuKind::PagePlot, 8});
+        menu_items_.push_back({"Region zoom", MenuKind::PagePlot, 9});
+        menu_items_.push_back({"Equal scale on/off", MenuKind::PagePlot, 10});
+        break;
+    case MenuKind::PageTable:
+        menu_items_.push_back({"Input page", MenuKind::PageTable, 0});
+        menu_items_.push_back({"Plot page", MenuKind::PageTable, 1});
+        menu_items_.push_back({"Range start", MenuKind::PageTable, 2});
+        menu_items_.push_back({"Range end", MenuKind::PageTable, 3});
+        menu_items_.push_back({"Step", MenuKind::PageTable, 4});
+        menu_items_.push_back({"Rebuild table", MenuKind::PageTable, 5});
+        break;
+    default:
+        break;
+    }
+}
+
+void GraphApp::onMenuButtonEvent(lv_event_t *e)
+{
+    auto *self = static_cast<GraphApp *>(lv_event_get_user_data(e));
+    if (self == nullptr) {
+        return;
+    }
+
+    lv_obj_t *target = lv_event_get_current_target_obj(e);
+    if (target == nullptr) {
+        return;
+    }
+
+    const lv_event_code_t code = lv_event_get_code(e);
+    const intptr_t index = reinterpret_cast<intptr_t>(lv_obj_get_user_data(target));
+    if (index < 0 || index >= static_cast<intptr_t>(self->menu_items_.size())) {
+        return;
+    }
+
+    if (code == LV_EVENT_FOCUSED) {
+        lv_obj_set_style_bg_color(target, LV_COLOR_MAKE(92, 116, 172), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(target, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_text_color(target, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
+        lv_obj_scroll_to_view(target, LV_ANIM_OFF);
+        return;
+    }
+
+    if (code == LV_EVENT_DEFOCUSED) {
+        lv_obj_set_style_bg_opa(target, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_text_color(target, LV_COLOR_MAKE(220, 230, 245), LV_PART_MAIN);
+        return;
+    }
+
+    if (code == LV_EVENT_CLICKED) {
+        self->activateMenuItem(static_cast<int>(index));
+        return;
+    }
+
+    if (code == LV_EVENT_KEY) {
+        const uint32_t key = lv_event_get_key(e);
+        if (key == LV_KEY_ENTER) {
+            self->activateMenuItem(static_cast<int>(index));
+        } else if (key == LV_KEY_ESC) {
+            self->closeMenu();
+        }
+    }
+}
+
 void GraphApp::updateTablePage()
 {
     if (table_status_ == nullptr) return;
@@ -891,32 +1201,89 @@ void GraphApp::updateMenuOverlay()
 {
     if (menu_overlay_ == nullptr || menu_list_ == nullptr) return;
 
-    const char *const *labels = kMenuInputLabels;
-    int count = 6;
-    if (menu_kind_ == MenuKind::PagePlot) {
-        labels = kMenuPlotLabels;
-    } else if (menu_kind_ == MenuKind::PageTable) {
-        labels = kMenuTableLabels;
-    }
-    menu_count_ = count;
+    buildMenuItems();
+    lv_obj_clean(menu_list_);
+    menu_rows_.clear();
 
-    for (int i = 0; i < count; ++i) {
-        menu_items_[i].label = labels[i];
-        if (menu_rows_[i] == nullptr) continue;
-        lv_obj_t *txt = lv_obj_get_child(menu_rows_[i], 0);
-        if (txt != nullptr) {
-            lv_label_set_text(txt, labels[i]);
+    for (size_t i = 0; i < menu_items_.size(); ++i) {
+        const MenuItem &item = menu_items_[i];
+        lv_obj_t *btn = lv_list_add_button(menu_list_, nullptr, item.label);
+        if (btn == nullptr) {
+            continue;
         }
-        if (i == menu_index_) {
-            lv_obj_set_style_bg_color(menu_rows_[i], LV_COLOR_MAKE(92, 116, 172), LV_PART_MAIN);
-            lv_obj_set_style_bg_opa(menu_rows_[i], LV_OPA_COVER, LV_PART_MAIN);
-            lv_obj_set_style_text_color(menu_rows_[i], LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
-            lv_obj_scroll_to_view(menu_rows_[i], LV_ANIM_OFF);
-        } else {
-            lv_obj_set_style_bg_opa(menu_rows_[i], LV_OPA_TRANSP, LV_PART_MAIN);
-            lv_obj_set_style_text_color(menu_rows_[i], LV_COLOR_MAKE(220, 230, 245), LV_PART_MAIN);
+        menu_rows_.push_back(btn);
+        lv_obj_set_width(btn, 206);
+        ui_theme::applyText14(btn);
+        lv_obj_set_style_text_color(btn, LV_COLOR_MAKE(220, 230, 245), LV_PART_MAIN);
+        lv_obj_set_style_pad_left(btn, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(btn, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(btn, 1, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(btn, 1, LV_PART_MAIN);
+        lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_user_data(btn, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
+        lv_obj_add_event_cb(btn, &GraphApp::onMenuButtonEvent, LV_EVENT_FOCUSED, this);
+        lv_obj_add_event_cb(btn, &GraphApp::onMenuButtonEvent, LV_EVENT_DEFOCUSED, this);
+        lv_obj_add_event_cb(btn, &GraphApp::onMenuButtonEvent, LV_EVENT_CLICKED, this);
+        lv_obj_add_event_cb(btn, &GraphApp::onMenuButtonEvent, LV_EVENT_KEY, this);
+        if (menu_group_ != nullptr) {
+            lv_group_add_obj(menu_group_, btn);
         }
     }
+
+    if (menu_group_ != nullptr && !menu_rows_.empty()) {
+        lv_group_focus_obj(menu_rows_.front());
+    }
+
+}
+
+void GraphApp::activateMenuItem(int index)
+{
+    if (index < 0 || static_cast<size_t>(index) >= menu_items_.size()) {
+        return;
+    }
+
+    const MenuItem item = menu_items_[static_cast<size_t>(index)];
+    if (item.kind == MenuKind::PageInput) {
+        switch (item.value) {
+        case 0: showPage(Page::Plot); break;
+        case 1: showPage(Page::Table); break;
+        case 2: startEntry(EntryKind::FunctionExpr, selected_func_); break;
+        case 3: toggleFunction(selected_func_); break;
+        case 4: cycleFunctionColor(selected_func_); break;
+        case 5: startEntry(EntryKind::FunctionExpr, selected_func_); break;
+        }
+    } else if (item.kind == MenuKind::PagePlot) {
+        switch (item.value) {
+        case 0: showPage(Page::Input); break;
+        case 1: showPage(Page::Table); break;
+        case 2: cursor_mode_ = !cursor_mode_; break;
+        case 3: resetPlotView(); break;
+        case 4: applyUniformScale(0.8f); break;
+        case 5: applyUniformScale(1.25f); break;
+        case 6: startEntry(EntryKind::ScaleXFactor); break;
+        case 7: startEntry(EntryKind::ScaleYFactor); break;
+        case 8: startEntry(EntryKind::ScaleFactor); break;
+        case 9: startRegionZoom(); break;
+        case 10:
+            plot_equal_scale_ = !plot_equal_scale_;
+            if (plot_equal_scale_) {
+                normalizePlotAspect();
+            }
+            markPlotDirty();
+            break;
+        }
+    } else if (item.kind == MenuKind::PageTable) {
+        switch (item.value) {
+        case 0: showPage(Page::Input); break;
+        case 1: showPage(Page::Plot); break;
+        case 2: startEntry(EntryKind::TableStart); break;
+        case 3: startEntry(EntryKind::TableEnd); break;
+        case 4: startEntry(EntryKind::TableStep); break;
+        case 5: markTableDirty(); break;
+        }
+    }
+
+    closeMenu();
 }
 
 void GraphApp::updateEntryOverlay()
@@ -930,8 +1297,15 @@ void GraphApp::updateEntryOverlay()
 void GraphApp::openMenu(MenuKind kind)
 {
     menu_kind_ = kind;
-    menu_index_ = 0;
     menu_open_ = true;
+    if (menu_group_ != nullptr) {
+        lv_group_delete(menu_group_);
+        menu_group_ = nullptr;
+    }
+    menu_group_ = lv_group_create();
+    if (menu_group_ != nullptr) {
+        lv_group_set_editing(menu_group_, false);
+    }
     if (menu_overlay_) {
         updateMenuOverlay();
         lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
@@ -942,6 +1316,10 @@ void GraphApp::openMenu(MenuKind kind)
 void GraphApp::closeMenu()
 {
     menu_open_ = false;
+    if (menu_group_ != nullptr) {
+        lv_group_delete(menu_group_);
+        menu_group_ = nullptr;
+    }
     if (menu_overlay_) {
         lv_obj_add_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
     }
@@ -975,6 +1353,21 @@ void GraphApp::startEntry(EntryKind kind, int func_index)
         std::snprintf(entry_title_buf_.data(), entry_title_buf_.size(), "Table step");
         std::snprintf(entry_prev_buf_.data(), entry_prev_buf_.size(), "%.6g", static_cast<double>(table_step_));
         std::snprintf(entry_buffer_, sizeof(entry_buffer_), "%.6g", static_cast<double>(table_step_));
+        break;
+    case EntryKind::ScaleFactor:
+        std::snprintf(entry_title_buf_.data(), entry_title_buf_.size(), "Scale factor");
+        std::snprintf(entry_prev_buf_.data(), entry_prev_buf_.size(), "1.25");
+        std::snprintf(entry_buffer_, sizeof(entry_buffer_), "1.25");
+        break;
+    case EntryKind::ScaleXFactor:
+        std::snprintf(entry_title_buf_.data(), entry_title_buf_.size(), "Scale x factor");
+        std::snprintf(entry_prev_buf_.data(), entry_prev_buf_.size(), "1.25");
+        std::snprintf(entry_buffer_, sizeof(entry_buffer_), "1.25");
+        break;
+    case EntryKind::ScaleYFactor:
+        std::snprintf(entry_title_buf_.data(), entry_title_buf_.size(), "Scale y factor");
+        std::snprintf(entry_prev_buf_.data(), entry_prev_buf_.size(), "1.25");
+        std::snprintf(entry_buffer_, sizeof(entry_buffer_), "1.25");
         break;
     default:
         return;
@@ -1010,6 +1403,12 @@ void GraphApp::finishEntry(bool confirm)
         } else if (entry_kind_ == EntryKind::TableStep) {
             table_step_ = std::max(0.0001f, parseEntryValue(text, table_step_));
             table_dirty_ = true;
+        } else if (entry_kind_ == EntryKind::ScaleFactor) {
+            applyUniformScale(std::max(0.0001f, parseEntryValue(text, 1.25f)));
+        } else if (entry_kind_ == EntryKind::ScaleXFactor) {
+            applyAxisScale(std::max(0.0001f, parseEntryValue(text, 1.25f)), true);
+        } else if (entry_kind_ == EntryKind::ScaleYFactor) {
+            applyAxisScale(std::max(0.0001f, parseEntryValue(text, 1.25f)), false);
         }
     }
 
@@ -1076,54 +1475,29 @@ void GraphApp::buildTablePage()
 
 void GraphApp::handleMenuInput(uint64_t newly)
 {
-    const uint64_t up = (1ULL << 39);
-    const uint64_t down = (1ULL << 53);
-    const uint64_t enter = (1ULL << 41);
     const uint64_t cancel = (1ULL << 13);
-
-    if ((newly & up) != 0U) {
-        if (menu_index_ > 0) --menu_index_;
-        updateMenuOverlay();
-    }
-    if ((newly & down) != 0U) {
-        if (menu_index_ + 1 < menu_count_) ++menu_index_;
-        updateMenuOverlay();
-    }
     if ((newly & cancel) != 0U || (newly & kFnBit) != 0U) {
         closeMenu();
         return;
     }
-    if ((newly & enter) == 0U) return;
 
-    if (menu_kind_ == MenuKind::PageInput) {
-        switch (menu_index_) {
-        case 0: showPage(Page::Plot); break;
-        case 1: showPage(Page::Table); break;
-        case 2: startEntry(EntryKind::FunctionExpr, selected_func_); break;
-        case 3: toggleFunction(selected_func_); break;
-        case 4: cycleFunctionColor(selected_func_); break;
-        case 5: startEntry(EntryKind::FunctionExpr, selected_func_); break;
-        }
-    } else if (menu_kind_ == MenuKind::PagePlot) {
-        switch (menu_index_) {
-        case 0: showPage(Page::Input); break;
-        case 1: showPage(Page::Table); break;
-        case 2: cursor_mode_ = !cursor_mode_; break;
-        case 3: plot_x_min_ = -6.0f; plot_x_max_ = 6.0f; plot_y_min_ = -4.0f; plot_y_max_ = 4.0f; markPlotDirty(); break;
-        case 4: { const float cx = (plot_x_min_ + plot_x_max_) * 0.5f; const float cy = (plot_y_min_ + plot_y_max_) * 0.5f; const float xr = (plot_x_max_ - plot_x_min_) * 0.7f; const float yr = (plot_y_max_ - plot_y_min_) * 0.7f; plot_x_min_ = cx - xr * 0.5f; plot_x_max_ = cx + xr * 0.5f; plot_y_min_ = cy - yr * 0.5f; plot_y_max_ = cy + yr * 0.5f; markPlotDirty(); break; }
-        case 5: { const float cx = (plot_x_min_ + plot_x_max_) * 0.5f; const float cy = (plot_y_min_ + plot_y_max_) * 0.5f; const float xr = (plot_x_max_ - plot_x_min_) * 1.4f; const float yr = (plot_y_max_ - plot_y_min_) * 1.4f; plot_x_min_ = cx - xr * 0.5f; plot_x_max_ = cx + xr * 0.5f; plot_y_min_ = cy - yr * 0.5f; plot_y_max_ = cy + yr * 0.5f; markPlotDirty(); break; }
-        }
-    } else if (menu_kind_ == MenuKind::PageTable) {
-        switch (menu_index_) {
-        case 0: showPage(Page::Input); break;
-        case 1: showPage(Page::Plot); break;
-        case 2: startEntry(EntryKind::TableStart); break;
-        case 3: startEntry(EntryKind::TableEnd); break;
-        case 4: startEntry(EntryKind::TableStep); break;
-        case 5: markTableDirty(); break;
-        }
+    if (menu_group_ == nullptr) {
+        return;
     }
-    closeMenu();
+
+    const uint64_t up = (1ULL << 39);
+    const uint64_t down = (1ULL << 53);
+    const uint64_t enter = (1ULL << 41);
+
+    if ((newly & up) != 0U) {
+        lv_group_focus_prev(menu_group_);
+    }
+    if ((newly & down) != 0U) {
+        lv_group_focus_next(menu_group_);
+    }
+    if ((newly & enter) != 0U) {
+        lv_group_send_data(menu_group_, LV_KEY_ENTER);
+    }
 }
 
 void GraphApp::handleEntryInput(uint64_t newly, uint64_t current_mask)
@@ -1173,7 +1547,6 @@ void GraphApp::handleInputPageInput(uint64_t newly, uint64_t current_mask)
 {
     (void)current_mask;
     const uint64_t enter = (1ULL << 41);
-    const uint64_t fn = kFnBit;
     const uint64_t space = kSpaceBit;
     const uint64_t cancel = (1ULL << 13);
     const uint64_t left = (1ULL << 52);
@@ -1199,9 +1572,6 @@ void GraphApp::handleInputPageInput(uint64_t newly, uint64_t current_mask)
     if ((newly & right) != 0U) {
         cycleFunctionColor(selected_func_);
     }
-    if ((newly & fn) != 0U) {
-        openMenu(MenuKind::PageInput);
-    }
     if ((newly & cancel) != 0U) {
         showPage(Page::Plot);
     }
@@ -1210,8 +1580,8 @@ void GraphApp::handleInputPageInput(uint64_t newly, uint64_t current_mask)
 void GraphApp::handlePlotPageInput(uint64_t newly, uint64_t current_mask)
 {
     (void)current_mask;
-    const uint64_t fn = kFnBit;
     const uint64_t enter = (1ULL << 41);
+    const uint64_t cancel = (1ULL << 13);
     const uint64_t left = (1ULL << 52);
     const uint64_t right = (1ULL << 54);
     const uint64_t up = (1ULL << 39);
@@ -1222,12 +1592,29 @@ void GraphApp::handlePlotPageInput(uint64_t newly, uint64_t current_mask)
     const uint64_t i = (1ULL << 8);
     const uint64_t r = (1ULL << 17);
 
-    if ((newly & fn) != 0U) {
-        openMenu(MenuKind::PagePlot);
-        return;
+    if (region_zoom_active_) {
+        if ((newly & cancel) != 0U) {
+            region_zoom_active_ = false;
+            region_zoom_anchor_set_ = false;
+            return;
+        }
+        if ((newly & enter) != 0U) {
+            if (!region_zoom_anchor_set_) {
+                region_zoom_anchor_sample_ = cursor_sample_;
+                region_zoom_anchor_set_ = true;
+            } else {
+                finishRegionZoom();
+            }
+            return;
+        }
     }
+
     if ((newly & enter) != 0U) {
-        cursor_mode_ = !cursor_mode_;
+        if (cursor_mode_) {
+            cursor_mode_ = false;
+        } else {
+            cursor_mode_ = true;
+        }
         return;
     }
 
@@ -1291,16 +1678,10 @@ void GraphApp::handlePlotPageInput(uint64_t newly, uint64_t current_mask)
 void GraphApp::handleTablePageInput(uint64_t newly, uint64_t current_mask)
 {
     (void)current_mask;
-    const uint64_t fn = kFnBit;
     const uint64_t left = (1ULL << 52);
     const uint64_t right = (1ULL << 54);
     const uint64_t up = (1ULL << 39);
     const uint64_t down = (1ULL << 53);
-
-    if ((newly & fn) != 0U) {
-        openMenu(MenuKind::PageTable);
-        return;
-    }
 
     if (table_obj_ == nullptr) return;
 
@@ -1349,6 +1730,40 @@ void GraphApp::handleKeyboardState(uint64_t pressedMask)
     case Page::Plot: handlePlotPageInput(newly, pressedMask); break;
     case Page::Table: handleTablePageInput(newly, pressedMask); break;
     }
+}
+
+void GraphApp::openPageMenu()
+{
+    switch (page_) {
+    case Page::Input:
+        openMenu(MenuKind::PageInput);
+        break;
+    case Page::Plot:
+        openMenu(MenuKind::PagePlot);
+        break;
+    case Page::Table:
+        openMenu(MenuKind::PageTable);
+        break;
+    }
+}
+
+void GraphApp::handleMappedKey(uint32_t key)
+{
+    if (key != LV_KEY_ESC) {
+        return;
+    }
+
+    if (entry_kind_ != EntryKind::None) {
+        finishEntry(false);
+        return;
+    }
+
+    if (menu_open_) {
+        closeMenu();
+        return;
+    }
+
+    openPageMenu();
 }
 
 void GraphApp::render()

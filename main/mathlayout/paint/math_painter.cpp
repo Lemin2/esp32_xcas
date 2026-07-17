@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <new>
 #include <utility>
 
 #include "lvgl.h"
@@ -120,6 +121,9 @@ bool shouldUseSymbolsFont(uint32_t cp)
     }
     switch (cp) {
     case 0x2208U: // ∈
+    case 0x220FU: // ∏
+    case 0x2211U: // ∑
+    case 0x221AU: // √
     case 0x221EU: // ∞
     case 0x2229U: // ∩
     case 0x222AU: // ∪
@@ -151,9 +155,9 @@ std::vector<Utf8Glyph> splitUtf8Glyphs(const std::string &line)
     return out;
 }
 
-struct CanvasStorage
+struct LinePointStorage
 {
-    lv_draw_buf_t *draw_buf = nullptr;
+    lv_point_precise_t points[2]{};
 };
 
 struct IntRect
@@ -453,11 +457,11 @@ bool emitSpecialSymbol(DrawList &draw_list,
 
     if (codepoint == kSymSqrtStem) {
         const int vx = right - std::max(1, cell_width / 5);
-        addLine(draw_list, vx, top + 1, vx, bottom - 1);
+        addLine(draw_list, vx, top + 1, vx, bottom - 1, 2);
         return true;
     }
     if (codepoint == kSymSqrtArm) {
-        addLine(draw_list, left + 1, bottom - 1, right - 1, top + 1);
+        addLine(draw_list, left + 1, bottom - 1, right - 1, top + 1, 2);
         return true;
     }
     if (codepoint == kSymSqrtHook) {
@@ -467,8 +471,8 @@ bool emitSpecialSymbol(DrawList &draw_list,
         const int p2y = bottom - 1;
         const int p3x = right - 1;
         const int p3y = top + 1;
-        addLine(draw_list, p1x, p1y, p2x, p2y);
-        addLine(draw_list, p2x, p2y, p3x, p3y);
+        addLine(draw_list, p1x, p1y, p2x, p2y, 2);
+        addLine(draw_list, p2x, p2y, p3x, p3y, 2);
         return true;
     }
 
@@ -482,17 +486,17 @@ bool emitSpecialSymbol(DrawList &draw_list,
     }
 
     if (codepoint == kSymSigmaTop) {
-        addLine(draw_list, left + 1, top + 1, right - 1, top + 1);
-        addLine(draw_list, right - 1, top + 1, left + 1, mid_y);
+        addLine(draw_list, left + 1, top + 1, right - 1, top + 1, 2);
+        addLine(draw_list, right - 1, top + 1, left + 1, mid_y, 2);
         return true;
     }
     if (codepoint == kSymSigmaMid) {
-        addLine(draw_list, left + 1, mid_y, right - 1, mid_y);
+        addLine(draw_list, left + 1, mid_y, right - 1, mid_y, 2);
         return true;
     }
     if (codepoint == kSymSigmaBot) {
-        addLine(draw_list, left + 1, mid_y, right - 1, bottom - 1);
-        addLine(draw_list, left + 1, bottom - 1, right - 1, bottom - 1);
+        addLine(draw_list, left + 1, mid_y, right - 1, bottom - 1, 2);
+        addLine(draw_list, left + 1, bottom - 1, right - 1, bottom - 1, 2);
         return true;
     }
 
@@ -626,67 +630,20 @@ int maxGlyphAdvance(const TextBox &box, const lv_font_t *font)
     return max_advance + 1;
 }
 
-void onCanvasDelete(lv_event_t *e)
+void onLineObjectDelete(lv_event_t *e)
 {
     if (e == nullptr) {
         return;
     }
 
-    lv_obj_t *canvas = static_cast<lv_obj_t *>(lv_event_get_target(e));
-    if (canvas == nullptr) {
+    lv_obj_t *line = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    if (line == nullptr) {
         return;
     }
 
-    auto *storage = static_cast<CanvasStorage *>(lv_obj_get_user_data(canvas));
-    if (storage == nullptr) {
-        return;
-    }
-
-    if (storage->draw_buf != nullptr) {
-        lv_draw_buf_destroy(storage->draw_buf);
-        storage->draw_buf = nullptr;
-    }
+    auto *storage = static_cast<LinePointStorage *>(lv_obj_get_user_data(line));
     delete storage;
-    lv_obj_set_user_data(canvas, nullptr);
-}
-
-bool ensureCanvasStorage(lv_obj_t *canvas, int width, int height)
-{
-    if (canvas == nullptr || width <= 0 || height <= 0) {
-        return false;
-    }
-
-    auto *storage = static_cast<CanvasStorage *>(lv_obj_get_user_data(canvas));
-    if (storage == nullptr) {
-        storage = new CanvasStorage();
-        lv_obj_set_user_data(canvas, storage);
-        lv_obj_add_event_cb(canvas, onCanvasDelete, LV_EVENT_DELETE, nullptr);
-    }
-
-    const bool needs_recreate =
-        storage->draw_buf == nullptr ||
-        storage->draw_buf->header.w != width ||
-        storage->draw_buf->header.h != height ||
-        storage->draw_buf->header.cf != LV_COLOR_FORMAT_RGB565;
-    if (!needs_recreate) {
-        return true;
-    }
-
-    if (storage->draw_buf != nullptr) {
-        lv_draw_buf_destroy(storage->draw_buf);
-        storage->draw_buf = nullptr;
-    }
-
-    storage->draw_buf = lv_draw_buf_create(static_cast<uint32_t>(width),
-                                           static_cast<uint32_t>(height),
-                                           LV_COLOR_FORMAT_RGB565,
-                                           LV_STRIDE_AUTO);
-    if (storage->draw_buf == nullptr) {
-        return false;
-    }
-
-    lv_canvas_set_draw_buf(canvas, storage->draw_buf);
-    return true;
+    lv_obj_set_user_data(line, nullptr);
 }
 
 IntRect normalizeViewport(const PaintViewport &viewport, int fallback_w, int fallback_h)
@@ -781,13 +738,38 @@ void simplifyLine(int &x1, int &y1, int &x2, int &y2)
     }
 }
 
-bool drawOneCommand(lv_layer_t &layer,
-                    const DrawCommand &command,
-                    const lv_font_t *font,
-                    lv_color_t text_color,
-                    const ProgressivePaintState &state)
+lv_obj_t *createSolidObject(lv_obj_t *host,
+                            int x,
+                            int y,
+                            int width,
+                            int height,
+                            lv_color_t color)
 {
-    if (font == nullptr) {
+    if (host == nullptr || width <= 0 || height <= 0) {
+        return nullptr;
+    }
+
+    lv_obj_t *obj = lv_obj_create(host);
+    if (obj == nullptr) {
+        return nullptr;
+    }
+
+    lv_obj_remove_style_all(obj);
+    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(obj, x, y);
+    lv_obj_set_size(obj, width, height);
+    lv_obj_set_style_bg_color(obj, color, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
+    return obj;
+}
+
+bool createObjectForCommand(lv_obj_t *host,
+                            const DrawCommand &command,
+                            const lv_font_t *font,
+                            lv_color_t text_color,
+                            const LvglObjectPaintState &state)
+{
+    if (host == nullptr || font == nullptr) {
         return false;
     }
 
@@ -797,6 +779,7 @@ bool drawOneCommand(lv_layer_t &layer,
         if (cp == 0U) {
             return false;
         }
+
         const lv_font_t *glyph_font = shouldUseSymbolsFont(cp) ? &lv_font_symbols_14 : font;
         const int glyph_w = std::max(1, static_cast<int>(lv_font_get_glyph_width(glyph_font, cp, 0)));
         const int glyph_h = std::max(1, static_cast<int>(lv_font_get_line_height(glyph_font)));
@@ -810,17 +793,19 @@ bool drawOneCommand(lv_layer_t &layer,
             return false;
         }
 
-        lv_draw_label_dsc_t dsc;
-        lv_draw_label_dsc_init(&dsc);
-        dsc.color = text_color;
-        dsc.font = glyph_font;
-        dsc.opa = LV_OPA_COVER;
+        lv_obj_t *label = lv_label_create(host);
+        if (label == nullptr) {
+            return false;
+        }
 
-        lv_point_t point = {
-            static_cast<lv_coord_t>(state.offset_x + glyph->x),
-            static_cast<lv_coord_t>(state.offset_y + glyph->y),
-        };
-        lv_draw_character(&layer, &dsc, &point, cp);
+        lv_obj_remove_style_all(label);
+        lv_obj_clear_flag(label, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_pos(label, state.offset_x + glyph->x, state.offset_y + glyph->y);
+        lv_obj_set_size(label, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_style_text_color(label, text_color, LV_PART_MAIN);
+        lv_obj_set_style_text_font(label, glyph_font, LV_PART_MAIN);
+        lv_obj_set_style_text_opa(label, LV_OPA_COVER, LV_PART_MAIN);
+        lv_label_set_text(label, glyph->text.c_str());
         return true;
     }
 
@@ -838,16 +823,45 @@ bool drawOneCommand(lv_layer_t &layer,
             return false;
         }
 
-        lv_draw_line_dsc_t dsc;
-        lv_draw_line_dsc_init(&dsc);
-        dsc.color = text_color;
-        dsc.width = std::max(1, line->width);
-        dsc.opa = LV_OPA_COVER;
-        dsc.p1.x = static_cast<lv_value_precise_t>(x1);
-        dsc.p1.y = static_cast<lv_value_precise_t>(y1);
-        dsc.p2.x = static_cast<lv_value_precise_t>(x2);
-        dsc.p2.y = static_cast<lv_value_precise_t>(y2);
-        lv_draw_line(&layer, &dsc);
+        const int line_width = std::max(1, line->width);
+        if (x1 == x2 || y1 == y2) {
+            const int x = std::min(x1, x2);
+            const int y = std::min(y1, y2);
+            const int width = (x1 == x2) ? line_width : (std::abs(x2 - x1) + 1);
+            const int height = (y1 == y2) ? line_width : (std::abs(y2 - y1) + 1);
+            return createSolidObject(host, x, y, width, height, text_color) != nullptr;
+        }
+
+        auto *storage = new (std::nothrow) LinePointStorage();
+        if (storage == nullptr) {
+            return false;
+        }
+
+        const int left = std::min(x1, x2);
+        const int top = std::min(y1, y2);
+        const int width = std::max(1, std::abs(x2 - x1) + line_width + 1);
+        const int height = std::max(1, std::abs(y2 - y1) + line_width + 1);
+        storage->points[0].x = static_cast<lv_value_precise_t>(x1 - left);
+        storage->points[0].y = static_cast<lv_value_precise_t>(y1 - top);
+        storage->points[1].x = static_cast<lv_value_precise_t>(x2 - left);
+        storage->points[1].y = static_cast<lv_value_precise_t>(y2 - top);
+
+        lv_obj_t *line_obj = lv_line_create(host);
+        if (line_obj == nullptr) {
+            delete storage;
+            return false;
+        }
+
+        lv_obj_remove_style_all(line_obj);
+        lv_obj_clear_flag(line_obj, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_pos(line_obj, left, top);
+        lv_obj_set_size(line_obj, width, height);
+        lv_obj_set_style_line_color(line_obj, text_color, LV_PART_MAIN);
+        lv_obj_set_style_line_width(line_obj, line_width, LV_PART_MAIN);
+        lv_obj_set_style_line_opa(line_obj, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_user_data(line_obj, storage);
+        lv_obj_add_event_cb(line_obj, onLineObjectDelete, LV_EVENT_DELETE, nullptr);
+        lv_line_set_points(line_obj, storage->points, 2);
         return true;
     }
 
@@ -862,27 +876,29 @@ bool drawOneCommand(lv_layer_t &layer,
             return false;
         }
 
-        lv_area_t coords = {
-            static_cast<lv_coord_t>(std::max(rect_i.x1, viewport.x1)),
-            static_cast<lv_coord_t>(std::max(rect_i.y1, viewport.y1)),
-            static_cast<lv_coord_t>(std::min(rect_i.x2, viewport.x2)),
-            static_cast<lv_coord_t>(std::min(rect_i.y2, viewport.y2)),
-        };
+        const int x1 = std::max(rect_i.x1, viewport.x1);
+        const int y1 = std::max(rect_i.y1, viewport.y1);
+        const int x2 = std::min(rect_i.x2, viewport.x2);
+        const int y2 = std::min(rect_i.y2, viewport.y2);
 
+        lv_obj_t *obj = lv_obj_create(host);
+        if (obj == nullptr) {
+            return false;
+        }
+
+        lv_obj_remove_style_all(obj);
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_pos(obj, x1, y1);
+        lv_obj_set_size(obj, std::max(1, x2 - x1 + 1), std::max(1, y2 - y1 + 1));
         if (rect->filled) {
-            lv_draw_fill_dsc_t dsc;
-            lv_draw_fill_dsc_init(&dsc);
-            dsc.color = text_color;
-            dsc.opa = LV_OPA_COVER;
-            lv_draw_fill(&layer, &dsc, &coords);
+            lv_obj_set_style_bg_color(obj, text_color, LV_PART_MAIN);
+            lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
         } else {
-            lv_draw_border_dsc_t dsc;
-            lv_draw_border_dsc_init(&dsc);
-            dsc.color = text_color;
-            dsc.width = 1;
-            dsc.side = LV_BORDER_SIDE_FULL;
-            dsc.opa = LV_OPA_COVER;
-            lv_draw_border(&layer, &dsc, &coords);
+            lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_set_style_border_color(obj, text_color, LV_PART_MAIN);
+            lv_obj_set_style_border_width(obj, 1, LV_PART_MAIN);
+            lv_obj_set_style_border_side(obj, LV_BORDER_SIDE_FULL, LV_PART_MAIN);
+            lv_obj_set_style_border_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
         }
         return true;
     }
@@ -988,48 +1004,15 @@ DrawList buildDrawList(const TextBox &box, const lv_font_t *font, int line_space
     return draw_list;
 }
 
-bool paintDrawListToCanvas(lv_obj_t *canvas,
-                           const DrawList &draw_list,
-                           const lv_font_t *font,
-                           lv_color_t text_color,
-                           lv_color_t bg_color,
-                           int offset_x,
-                           int offset_y)
+bool beginTileRenderToLvglObjects(lv_obj_t *host,
+                                  const DrawList &draw_list,
+                                  lv_color_t bg_color,
+                                  LvglObjectPaintState &state,
+                                  int offset_x,
+                                  int offset_y,
+                                  const PaintViewport *viewport)
 {
-    if (canvas == nullptr || font == nullptr || draw_list.width <= 0 || draw_list.height <= 0) {
-        return false;
-    }
-
-    ProgressivePaintState state;
-    if (!beginProgressivePaintToCanvas(canvas, draw_list, bg_color, state, offset_x, offset_y, nullptr)) {
-        return false;
-    }
-
-    bool finished = false;
-    while (!finished) {
-        if (!stepProgressivePaintToCanvas(canvas,
-                                          draw_list,
-                                          font,
-                                          text_color,
-                                          state,
-                                          draw_list.commands.size() + 1U,
-                                          draw_list.commands.size(),
-                                          &finished)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool beginProgressivePaintToCanvas(lv_obj_t *canvas,
-                                   const DrawList &draw_list,
-                                   lv_color_t bg_color,
-                                   ProgressivePaintState &state,
-                                   int offset_x,
-                                   int offset_y,
-                                   const PaintViewport *viewport)
-{
-    if (canvas == nullptr || draw_list.width <= 0 || draw_list.height <= 0) {
+    if (host == nullptr || draw_list.width <= 0 || draw_list.height <= 0) {
         return false;
     }
 
@@ -1045,12 +1028,13 @@ bool beginProgressivePaintToCanvas(lv_obj_t *canvas,
     vp.width = std::max(1, vp.width);
     vp.height = std::max(1, vp.height);
 
-    if (!ensureCanvasStorage(canvas, vp.width, vp.height)) {
-        return false;
-    }
-
-    lv_obj_set_size(canvas, vp.width, vp.height);
-    lv_canvas_fill_bg(canvas, bg_color, LV_OPA_COVER);
+    lv_obj_clean(host);
+    lv_obj_clear_flag(host, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(host, vp.width, vp.height);
+    lv_obj_set_style_bg_color(host, bg_color, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(host, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(host, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(host, 0, LV_PART_MAIN);
 
     state.next_line_scan = 0;
     state.next_other_scan = 0;
@@ -1059,46 +1043,43 @@ bool beginProgressivePaintToCanvas(lv_obj_t *canvas,
     state.offset_x = offset_x - vp.x;
     state.offset_y = offset_y - vp.y;
     state.viewport = {0, 0, vp.width, vp.height};
+    lv_obj_invalidate(host);
     return true;
 }
 
-bool stepProgressivePaintToCanvas(lv_obj_t *canvas,
-                                  const DrawList &draw_list,
-                                  const lv_font_t *font,
-                                  lv_color_t text_color,
-                                  ProgressivePaintState &state,
-                                  size_t max_commands,
-                                  size_t max_line_commands,
-                                  bool *out_finished)
+bool stepTileRenderToLvglObjects(lv_obj_t *host,
+                                 const DrawList &draw_list,
+                                 const lv_font_t *font,
+                                 lv_color_t text_color,
+                                 LvglObjectPaintState &state,
+                                 size_t max_commands,
+                                 size_t max_line_commands,
+                                 bool *out_finished)
 {
     if (out_finished != nullptr) {
         *out_finished = false;
     }
-    if (canvas == nullptr || font == nullptr || !state.initialized) {
+    if (host == nullptr || font == nullptr || !state.initialized) {
         return false;
     }
 
     const size_t cmd_cap = std::max<size_t>(1, max_commands);
     const size_t line_cap = std::max<size_t>(1, max_line_commands);
-    size_t drawn_total = 0;
-    size_t drawn_lines = 0;
-
-    lv_layer_t layer;
-    lv_canvas_init_layer(canvas, &layer);
+    size_t visited_total = 0;
+    size_t visited_lines = 0;
 
     if (!state.line_pass_done) {
         while (state.next_line_scan < draw_list.commands.size() &&
-               drawn_total < cmd_cap &&
-               drawn_lines < line_cap) {
+               visited_total < cmd_cap &&
+               visited_lines < line_cap) {
             const DrawCommand &cmd = draw_list.commands[state.next_line_scan];
             ++state.next_line_scan;
             if (!std::holds_alternative<DrawLineCommand>(cmd)) {
                 continue;
             }
-            if (drawOneCommand(layer, cmd, font, text_color, state)) {
-                ++drawn_total;
-                ++drawn_lines;
-            }
+            (void)createObjectForCommand(host, cmd, font, text_color, state);
+            ++visited_total;
+            ++visited_lines;
         }
         if (state.next_line_scan >= draw_list.commands.size()) {
             state.line_pass_done = true;
@@ -1106,20 +1087,20 @@ bool stepProgressivePaintToCanvas(lv_obj_t *canvas,
     }
 
     const bool allow_non_line_pass = cmd_cap > line_cap;
-    if (allow_non_line_pass && state.line_pass_done && drawn_total < cmd_cap) {
-        while (state.next_other_scan < draw_list.commands.size() && drawn_total < cmd_cap) {
+    if (allow_non_line_pass && state.line_pass_done && visited_total < cmd_cap) {
+        while (state.next_other_scan < draw_list.commands.size() && visited_total < cmd_cap) {
             const DrawCommand &cmd = draw_list.commands[state.next_other_scan];
             ++state.next_other_scan;
             if (std::holds_alternative<DrawLineCommand>(cmd)) {
                 continue;
             }
-            if (drawOneCommand(layer, cmd, font, text_color, state)) {
-                ++drawn_total;
-            }
+            (void)createObjectForCommand(host, cmd, font, text_color, state);
+            ++visited_total;
         }
     }
 
-    lv_canvas_finish_layer(canvas, &layer);
+    lv_obj_update_layout(host);
+    lv_obj_invalidate(host);
 
     const bool finished = state.line_pass_done && state.next_other_scan >= draw_list.commands.size();
     if (out_finished != nullptr) {
@@ -1128,18 +1109,38 @@ bool stepProgressivePaintToCanvas(lv_obj_t *canvas,
     return true;
 }
 
-bool paintTextBoxToCanvas(lv_obj_t *canvas,
-                          const TextBox &box,
-                          const lv_font_t *font,
-                          lv_color_t text_color,
-                          lv_color_t bg_color,
-                          DrawList *out_draw_list)
+bool renderDrawListToLvglObjects(lv_obj_t *host,
+                                 const DrawList &draw_list,
+                                 const lv_font_t *font,
+                                 lv_color_t text_color,
+                                 lv_color_t bg_color,
+                                 int offset_x,
+                                 int offset_y,
+                                 const PaintViewport *viewport)
 {
-    DrawList draw_list = buildDrawList(box, font);
-    if (out_draw_list != nullptr) {
-        *out_draw_list = draw_list;
+    if (host == nullptr || font == nullptr || draw_list.width <= 0 || draw_list.height <= 0) {
+        return false;
     }
-    return paintDrawListToCanvas(canvas, draw_list, font, text_color, bg_color);
+
+    LvglObjectPaintState state;
+    if (!beginTileRenderToLvglObjects(host, draw_list, bg_color, state, offset_x, offset_y, viewport)) {
+        return false;
+    }
+
+    bool finished = false;
+    while (!finished) {
+        if (!stepTileRenderToLvglObjects(host,
+                                         draw_list,
+                                         font,
+                                         text_color,
+                                         state,
+                                         256,
+                                         192,
+                                         &finished)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace xcas::mathlayout

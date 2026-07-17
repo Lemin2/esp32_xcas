@@ -55,24 +55,24 @@ void ProjectApp::ensureUi()
     lv_obj_set_flex_flow(root_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(root_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(root_, 3, LV_PART_MAIN);
-    lv_obj_clear_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(root_, LV_SCROLLBAR_MODE_AUTO);
 
     title_ = lv_label_create(root_);
     ui_theme::applyText16(title_);
     lv_obj_set_style_text_color(title_, LV_COLOR_MAKE(24, 84, 192), LV_PART_MAIN);
     lv_label_set_text(title_, "Projects");
 
-    body_ = lv_label_create(root_);
-    ui_theme::applyText14(body_);
-    lv_obj_set_style_text_color(body_, LV_COLOR_MAKE(16, 24, 36), LV_PART_MAIN);
-    lv_label_set_long_mode(body_, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(body_, w - 16);
+    list_ = lv_list_create(root_);
+    lv_obj_set_width(list_, w - 12);
+    lv_obj_set_flex_grow(list_, 1);
+    ui_theme::applyPanel(list_, LV_COLOR_MAKE(252, 252, 248), LV_COLOR_MAKE(220, 224, 232), 8, 4, 4);
+    lv_obj_set_scrollbar_mode(list_, LV_SCROLLBAR_MODE_AUTO);
 
-    hint_ = lv_label_create(root_);
-    ui_theme::applyText14(hint_);
-    lv_obj_set_style_text_color(hint_, LV_COLOR_MAKE(120, 130, 144), LV_PART_MAIN);
-    lv_obj_align(hint_, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    lv_label_set_text(hint_, ";/. select  Enter new  Bksp del");
+    status_ = lv_label_create(root_);
+    ui_theme::applyText14(status_);
+    lv_obj_set_style_text_color(status_, LV_COLOR_MAKE(100, 112, 132), LV_PART_MAIN);
+    lv_label_set_text(status_, "Enter new, Backspace delete");
 
     ui_ready_ = true;
 }
@@ -114,23 +114,44 @@ void ProjectApp::refreshList()
     if (!ui_ready_) {
         return;
     }
+
+    lv_obj_clean(list_);
+
     if (!mounted_) {
-        lv_label_set_text(body_, "Storage not available.");
-        return;
-    }
-    if (notes_.empty()) {
-        lv_label_set_text(body_, "No projects yet.\nPress Enter to create one.");
+        lv_obj_t *row = lv_list_add_btn(list_, nullptr, "Storage unavailable");
+        ui_theme::applyText14(row);
+        lv_label_set_text(status_, "LittleFS /data not mounted");
         return;
     }
 
-    std::string text;
-    for (int i = 0; i < static_cast<int>(notes_.size()); ++i) {
-        char line[80];
-        std::snprintf(line, sizeof(line), "%s %s\n", (i == selected_) ? ">" : " ",
-                      notes_[i].c_str());
-        text += line;
+    if (notes_.empty()) {
+        lv_obj_t *row = lv_list_add_btn(list_, nullptr, "No projects yet");
+        ui_theme::applyText14(row);
+        lv_label_set_text(status_, "Press Enter to create");
+        return;
     }
-    lv_label_set_text(body_, text.c_str());
+
+    for (int i = 0; i < static_cast<int>(notes_.size()); ++i) {
+        lv_obj_t *row = lv_list_add_btn(list_, nullptr, notes_[i].c_str());
+        ui_theme::applyText14(row);
+        lv_obj_set_style_pad_left(row, 6, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(row, 6, LV_PART_MAIN);
+
+        if (i == selected_) {
+            lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_bg_color(row, LV_COLOR_MAKE(24, 84, 192), LV_PART_MAIN);
+            lv_obj_set_style_text_color(row, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
+            lv_obj_scroll_to_view(row, LV_ANIM_OFF);
+        } else {
+            lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_set_style_text_color(row, LV_COLOR_MAKE(16, 24, 36), LV_PART_MAIN);
+        }
+    }
+
+    char status[64];
+    std::snprintf(status, sizeof(status), "%d project(s)  Enter:new  Bksp:del",
+                  static_cast<int>(notes_.size()));
+    lv_label_set_text(status_, status);
 }
 
 void ProjectApp::createNote()

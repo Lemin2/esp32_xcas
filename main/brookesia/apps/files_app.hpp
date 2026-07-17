@@ -31,8 +31,11 @@ private:
 
     lv_obj_t *root_ = nullptr;
     lv_obj_t *title_ = nullptr;
-    lv_obj_t *body_ = nullptr;
-    lv_obj_t *hint_ = nullptr;
+    lv_obj_t *list_ = nullptr;
+    lv_obj_t *status_ = nullptr;
+    lv_obj_t *preview_panel_ = nullptr;
+    lv_obj_t *preview_title_ = nullptr;
+    lv_obj_t *preview_body_ = nullptr;
 
     std::vector<std::string> names_;
     Mode mode_ = Mode::List;

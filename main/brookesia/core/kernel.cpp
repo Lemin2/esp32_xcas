@@ -11,6 +11,7 @@
 #include "brookesia/apps/graph_app.hpp"
 #include "brookesia/apps/project_app.hpp"
 #include "brookesia/apps/settings_app.hpp"
+#include "brookesia/core/app_settings.hpp"
 #include "brookesia/core/ui_theme.hpp"
 
 namespace ui_theme = brookesia::ui_theme;
@@ -60,6 +61,8 @@ Kernel::Kernel() : services_(board_, casService_) {}
 
 bool Kernel::start()
 {
+    settings::load();
+
     board_.initializeDisplay();
     board_.initializeKeyboard();
     drawBootSplash();
@@ -116,9 +119,10 @@ void Kernel::handleKeyboardState(uint64_t pressedMask)
     }
 
     const bool fn_active = fn_locked_;
-    if (fn_active && ((newly_pressed & kQBit) != 0U)) {
+    const settings::AppSettings app_settings = settings::get();
+    if (app_settings.fn_app_switch_enabled && fn_active && ((newly_pressed & kQBit) != 0U)) {
         prevRoute();
-    } else if (fn_active && ((newly_pressed & kWBit) != 0U)) {
+    } else if (app_settings.fn_app_switch_enabled && fn_active && ((newly_pressed & kWBit) != 0U)) {
         nextRoute();
     }
 

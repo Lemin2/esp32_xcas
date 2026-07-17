@@ -53,6 +53,8 @@ namespace xcas
         static void onInputBoxEvent(lv_event_t *e);
 
         void initializeLvgl();
+        void loadSession();
+        void saveSession();
         void buildLayout();
         void updateHeaderText();
         void setStatusText(const char *text);
@@ -103,7 +105,7 @@ namespace xcas
         lv_obj_t *history_list_;
         lv_obj_t *editor_panel_;
         lv_obj_t *editor_preview_host_;
-        lv_obj_t *editor_preview_canvas_;
+        lv_obj_t *editor_preview_formula_;
         lv_obj_t *editor_preview_label_;
         lv_obj_t *editor_hint_label_;
         lv_obj_t *input_box_;
@@ -130,6 +132,7 @@ namespace xcas
         uint32_t pending_release_key_ = 0;
         bool has_pending_release_ = false;
         bool lvgl_initialized_;
+        bool session_loaded_ = false;
         bool redraw_recovery_pending_;
         bool fn_toggled_;
         bool caps_toggled_;
@@ -149,14 +152,14 @@ namespace xcas
         std::string ac_prefix_;
         int ac_index_ = 0;
 
-        bool preview_use_canvas_ = false;
+        bool preview_use_objects_ = false;
         int preview_content_w_ = 0;
         int preview_content_h_ = 0;
         int preview_pan_x_ = 0;
         int preview_pan_y_ = 0;
         bool preview_paint_pending_ = false;
         mathlayout::DrawList preview_draw_list_;
-        mathlayout::ProgressivePaintState preview_paint_state_;
+        mathlayout::LvglObjectPaintState preview_paint_state_;
         std::string preview_line_;
     };
 

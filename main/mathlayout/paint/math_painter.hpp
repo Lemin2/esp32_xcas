@@ -54,7 +54,7 @@ struct PaintViewport
     int height = 0;
 };
 
-struct ProgressivePaintState
+struct LvglObjectPaintState
 {
     size_t next_line_scan = 0;
     size_t next_other_scan = 0;
@@ -67,36 +67,30 @@ struct ProgressivePaintState
 
 DrawList buildDrawList(const TextBox &box, const lv_font_t *font, int line_space = 2);
 
-bool paintDrawListToCanvas(lv_obj_t *canvas,
-                           const DrawList &draw_list,
-                           const lv_font_t *font,
-                           lv_color_t text_color,
-                           lv_color_t bg_color,
-                           int offset_x = 0,
-                           int offset_y = 0);
-
-bool beginProgressivePaintToCanvas(lv_obj_t *canvas,
-                                   const DrawList &draw_list,
-                                   lv_color_t bg_color,
-                                   ProgressivePaintState &state,
-                                   int offset_x = 0,
-                                   int offset_y = 0,
-                                   const PaintViewport *viewport = nullptr);
-
-bool stepProgressivePaintToCanvas(lv_obj_t *canvas,
+bool beginTileRenderToLvglObjects(lv_obj_t *host,
                                   const DrawList &draw_list,
-                                  const lv_font_t *font,
-                                  lv_color_t text_color,
-                                  ProgressivePaintState &state,
-                                  size_t max_commands,
-                                  size_t max_line_commands,
-                                  bool *out_finished = nullptr);
+                                  lv_color_t bg_color,
+                                  LvglObjectPaintState &state,
+                                  int offset_x = 0,
+                                  int offset_y = 0,
+                                  const PaintViewport *viewport = nullptr);
 
-bool paintTextBoxToCanvas(lv_obj_t *canvas,
-                          const TextBox &box,
-                          const lv_font_t *font,
-                          lv_color_t text_color,
-                          lv_color_t bg_color,
-                          DrawList *out_draw_list = nullptr);
+bool stepTileRenderToLvglObjects(lv_obj_t *host,
+                                 const DrawList &draw_list,
+                                 const lv_font_t *font,
+                                 lv_color_t text_color,
+                                 LvglObjectPaintState &state,
+                                 size_t max_commands,
+                                 size_t max_line_commands,
+                                 bool *out_finished = nullptr);
+
+bool renderDrawListToLvglObjects(lv_obj_t *host,
+                                 const DrawList &draw_list,
+                                 const lv_font_t *font,
+                                 lv_color_t text_color,
+                                 lv_color_t bg_color,
+                                 int offset_x = 0,
+                                 int offset_y = 0,
+                                 const PaintViewport *viewport = nullptr);
 
 } // namespace xcas::mathlayout

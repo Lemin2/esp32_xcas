@@ -30,8 +30,8 @@ private:
 
     lv_obj_t *root_ = nullptr;
     lv_obj_t *title_ = nullptr;
-    lv_obj_t *body_ = nullptr;
-    lv_obj_t *hint_ = nullptr;
+    lv_obj_t *list_ = nullptr;
+    lv_obj_t *status_ = nullptr;
 
     std::vector<std::string> notes_;
     int selected_ = 0;

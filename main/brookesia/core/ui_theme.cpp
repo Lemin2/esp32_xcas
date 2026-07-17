@@ -72,7 +72,6 @@ void applyPage(lv_obj_t *obj, lv_color_t bg_color)
     }
     lv_obj_set_style_bg_color(obj, bg_color, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
 void applyPanel(lv_obj_t *obj,

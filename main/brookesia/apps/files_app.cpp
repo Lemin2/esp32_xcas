@@ -31,7 +31,7 @@ void seedReadme()
     FILE *f = std::fopen(path, "w");
     if (f != nullptr) {
         std::fputs("M5Cardputer giac storage.\n"
-                   "Files here live on the FAT 'storage' partition.\n"
+                   "Files here live on the LittleFS 'storage' partition.\n"
                    "Use the Project app to create notes.\n",
                    f);
         std::fclose(f);
@@ -68,22 +68,43 @@ void FilesApp::ensureUi()
     lv_obj_set_flex_flow(root_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(root_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_row(root_, 3, LV_PART_MAIN);
-    lv_obj_clear_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(root_, LV_SCROLLBAR_MODE_AUTO);
 
     title_ = lv_label_create(root_);
     ui_theme::applyText16(title_);
     lv_obj_set_style_text_color(title_, LV_COLOR_MAKE(24, 84, 192), LV_PART_MAIN);
+    lv_label_set_text(title_, "Files");
 
-    body_ = lv_label_create(root_);
-    ui_theme::applyText14(body_);
-    lv_obj_set_style_text_color(body_, LV_COLOR_MAKE(16, 24, 36), LV_PART_MAIN);
-    lv_label_set_long_mode(body_, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(body_, w - 16);
+    list_ = lv_list_create(root_);
+    lv_obj_set_width(list_, w - 12);
+    lv_obj_set_flex_grow(list_, 1);
+    ui_theme::applyPanel(list_, LV_COLOR_MAKE(252, 252, 248), LV_COLOR_MAKE(220, 224, 232), 8, 4, 4);
+    lv_obj_set_scrollbar_mode(list_, LV_SCROLLBAR_MODE_AUTO);
 
-    hint_ = lv_label_create(root_);
-    ui_theme::applyText14(hint_);
-    lv_obj_set_style_text_color(hint_, LV_COLOR_MAKE(120, 130, 144), LV_PART_MAIN);
-    lv_obj_align(hint_, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    preview_panel_ = lv_obj_create(root_);
+    lv_obj_set_width(preview_panel_, w - 12);
+    lv_obj_set_flex_grow(preview_panel_, 1);
+    ui_theme::applyPanel(preview_panel_, LV_COLOR_MAKE(252, 252, 248), LV_COLOR_MAKE(220, 224, 232), 8, 4, 4);
+    lv_obj_set_style_pad_all(preview_panel_, 4, LV_PART_MAIN);
+    lv_obj_set_flex_flow(preview_panel_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(preview_panel_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_add_flag(preview_panel_, LV_OBJ_FLAG_HIDDEN);
+
+    preview_title_ = lv_label_create(preview_panel_);
+    ui_theme::applyText14(preview_title_);
+    lv_obj_set_style_text_color(preview_title_, LV_COLOR_MAKE(34, 68, 140), LV_PART_MAIN);
+
+    preview_body_ = lv_label_create(preview_panel_);
+    ui_theme::applyText14(preview_body_);
+    lv_obj_set_style_text_color(preview_body_, LV_COLOR_MAKE(16, 24, 36), LV_PART_MAIN);
+    lv_label_set_long_mode(preview_body_, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(preview_body_, w - 24);
+    lv_obj_set_flex_grow(preview_body_, 1);
+
+    status_ = lv_label_create(root_);
+    ui_theme::applyText14(status_);
+    lv_obj_set_style_text_color(status_, LV_COLOR_MAKE(100, 112, 132), LV_PART_MAIN);
 
     ui_ready_ = true;
 }
@@ -123,31 +144,54 @@ void FilesApp::refreshList()
     if (!ui_ready_) {
         return;
     }
+
     mode_ = Mode::List;
-    lv_label_set_text(title_, "Files  /data");
-    lv_label_set_text(hint_, ";/. select   Enter open");
+    lv_label_set_text(title_, "Files");
+    lv_obj_clear_flag(list_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(preview_panel_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clean(list_);
 
     if (!mounted_) {
-        lv_label_set_text(body_, "Storage not available.");
-        return;
-    }
-    if (names_.empty()) {
-        lv_label_set_text(body_, "(empty - dir listing\nunavailable in build)");
+        lv_obj_t *row = lv_list_add_btn(list_, nullptr, "Storage unavailable");
+        ui_theme::applyText14(row);
+        lv_label_set_text(status_, "LittleFS /data not mounted");
         return;
     }
 
-    std::string text;
+    if (names_.empty()) {
+        lv_obj_t *row = lv_list_add_btn(list_, nullptr, "(empty)");
+        ui_theme::applyText14(row);
+        lv_label_set_text(status_, "No files");
+        return;
+    }
+
     for (int i = 0; i < static_cast<int>(names_.size()); ++i) {
-        char line[80];
+        char line[96];
         char path[96];
         std::snprintf(path, sizeof(path), "%s/%s", kStoragePath, names_[i].c_str());
         struct stat st = {};
         long size = (stat(path, &st) == 0) ? static_cast<long>(st.st_size) : 0;
-        std::snprintf(line, sizeof(line), "%s %s  (%ldB)\n", (i == selected_) ? ">" : " ",
-                      names_[i].c_str(), size);
-        text += line;
+
+        std::snprintf(line, sizeof(line), "%s  %ldB", names_[i].c_str(), size);
+        lv_obj_t *row = lv_list_add_btn(list_, nullptr, line);
+        ui_theme::applyText14(row);
+        lv_obj_set_style_pad_left(row, 6, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(row, 6, LV_PART_MAIN);
+
+        if (i == selected_) {
+            lv_obj_set_style_bg_opa(row, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_bg_color(row, LV_COLOR_MAKE(24, 84, 192), LV_PART_MAIN);
+            lv_obj_set_style_text_color(row, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
+            lv_obj_scroll_to_view(row, LV_ANIM_OFF);
+        } else {
+            lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, LV_PART_MAIN);
+            lv_obj_set_style_text_color(row, LV_COLOR_MAKE(16, 24, 36), LV_PART_MAIN);
+        }
     }
-    lv_label_set_text(body_, text.c_str());
+
+    char status[48];
+    std::snprintf(status, sizeof(status), "%d file(s)", static_cast<int>(names_.size()));
+    lv_label_set_text(status_, status);
 }
 
 void FilesApp::preview()
@@ -159,19 +203,22 @@ void FilesApp::preview()
 
     char path[96];
     std::snprintf(path, sizeof(path), "%s/%s", kStoragePath, names_[selected_].c_str());
-    lv_label_set_text(title_, names_[selected_].c_str());
-    lv_label_set_text(hint_, "Enter / , back");
+    lv_label_set_text(title_, "Preview");
+    lv_obj_add_flag(list_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(preview_panel_, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(preview_title_, names_[selected_].c_str());
+    lv_label_set_text(status_, "Press , to return");
 
     FILE *f = std::fopen(path, "r");
     if (f == nullptr) {
-        lv_label_set_text(body_, "(cannot open)");
+        lv_label_set_text(preview_body_, "(cannot open)");
         return;
     }
     char buf[201];
     size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
     buf[n] = '\0';
     std::fclose(f);
-    lv_label_set_text(body_, (n == 0) ? "(empty file)" : buf);
+    lv_label_set_text(preview_body_, (n == 0) ? "(empty file)" : buf);
 }
 
 void FilesApp::onFocus()
