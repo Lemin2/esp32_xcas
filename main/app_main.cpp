@@ -111,10 +111,52 @@ bool mapToLvglKey(int keyIndex, bool fnActive, bool shiftActive, uint32_t &out)
         out = ' ';
         return true;
     }
-
     const char *label = shiftActive ? key.shifted : key.base;
     if (label != nullptr && label[0] != '\0' && label[1] == '\0') {
         out = static_cast<uint32_t>(static_cast<unsigned char>(label[0]));
+        return true;
+    }
+
+    return false;
+}
+
+bool parseDebugKey(const char *token, uint32_t &out)
+{
+    if (token == nullptr || token[0] == '\0') {
+        return false;
+    }
+
+    if (std::strcmp(token, "UP") == 0) {
+        out = LV_KEY_UP;
+        return true;
+    }
+    if (std::strcmp(token, "DOWN") == 0) {
+        out = LV_KEY_DOWN;
+        return true;
+    }
+    if (std::strcmp(token, "LEFT") == 0) {
+        out = LV_KEY_LEFT;
+        return true;
+    }
+    if (std::strcmp(token, "RIGHT") == 0) {
+        out = LV_KEY_RIGHT;
+        return true;
+    }
+    if (std::strcmp(token, "ENTER") == 0) {
+        out = LV_KEY_ENTER;
+        return true;
+    }
+    if (std::strcmp(token, "ESC") == 0) {
+        out = LV_KEY_ESC;
+        return true;
+    }
+    if (std::strcmp(token, "SPACE") == 0) {
+        out = static_cast<uint32_t>(' ');
+        return true;
+    }
+
+    if (token[1] == '\0') {
+        out = static_cast<uint32_t>(token[0]);
         return true;
     }
 
@@ -249,6 +291,9 @@ private:
         Submit,
         Screenshot,
         Run,
+        RenderShot,
+        Key,
+        PreviewShot,
     };
 
     struct DebugCommand {
@@ -305,6 +350,22 @@ private:
                 kernel_.debugSubmitFormula(cmd.payload.data());
                 pending_screenshot_frames_ = 45;
                 break;
+            case DebugCmdType::RenderShot:
+                kernel_.debugEmitFormulaImage(cmd.payload.data());
+                break;
+            case DebugCmdType::Key: {
+                uint32_t key = 0;
+                if (parseDebugKey(cmd.payload.data(), key)) {
+                    pushMappedKey(key);
+                }
+                break;
+            }
+            case DebugCmdType::PreviewShot:
+                // Sequence over multiple UI frames:
+                // 1) move to newest output then input row, 2) enter preview, 3) screenshot, 4) close preview.
+                pending_preview_stage_ = 1;
+                pending_preview_frames_ = 2;
+                break;
             }
         }
 
@@ -312,6 +373,43 @@ private:
             --pending_screenshot_frames_;
             if (pending_screenshot_frames_ == 0) {
                 kernel_.requestScreenshot();
+            }
+        }
+
+        if (pending_preview_stage_ != 0 && pending_preview_frames_ > 0) {
+            --pending_preview_frames_;
+            if (pending_preview_frames_ == 0) {
+                switch (pending_preview_stage_) {
+                case 1:
+                    pushMappedKey(LV_KEY_UP);
+                    pending_preview_stage_ = 2;
+                    pending_preview_frames_ = 2;
+                    break;
+                case 2:
+                    pushMappedKey(LV_KEY_UP);
+                    pending_preview_stage_ = 3;
+                    pending_preview_frames_ = 2;
+                    break;
+                case 3:
+                    pushMappedKey(static_cast<uint32_t>(' '));
+                    pending_preview_stage_ = 4;
+                    pending_preview_frames_ = 3;
+                    break;
+                case 4:
+                    kernel_.requestScreenshot();
+                    pending_preview_stage_ = 5;
+                    pending_preview_frames_ = 2;
+                    break;
+                case 5:
+                    pushMappedKey(static_cast<uint32_t>(' '));
+                    pending_preview_stage_ = 0;
+                    pending_preview_frames_ = 0;
+                    break;
+                default:
+                    pending_preview_stage_ = 0;
+                    pending_preview_frames_ = 0;
+                    break;
+                }
             }
         }
     }
@@ -376,8 +474,23 @@ private:
                         box.baseline, box.height());
             return;
         }
+        if (std::strncmp(line, "ML RENDER_SHOT ", 15) == 0) {
+            enqueueDebugCommand(DebugCmdType::RenderShot, line + 15);
+            std::printf("ML_ACK RENDER_SHOT\n");
+            return;
+        }
+        if (std::strncmp(line, "ML KEY ", 7) == 0) {
+            enqueueDebugCommand(DebugCmdType::Key, line + 7);
+            std::printf("ML_ACK KEY\n");
+            return;
+        }
+        if (std::strcmp(line, "ML PREVIEW_SHOT") == 0) {
+            enqueueDebugCommand(DebugCmdType::PreviewShot, nullptr);
+            std::printf("ML_ACK PREVIEW_SHOT\n");
+            return;
+        }
         if (std::strcmp(line, "ML HELP") == 0) {
-            std::printf("ML_HELP Commands: ML SUBMIT <expr> | ML SHOT | ML RUN <expr> | ML RENDER <expr>\n");
+            std::printf("ML_HELP Commands: ML SUBMIT <expr> | ML SHOT | ML RUN <expr> | ML RENDER <expr> | ML RENDER_SHOT <expr> | ML KEY <UP|DOWN|LEFT|RIGHT|ENTER|ESC|SPACE|char> | ML PREVIEW_SHOT\n");
             return;
         }
     }
@@ -420,6 +533,8 @@ private:
     std::atomic<uint8_t> debug_head_{0};
     std::atomic<uint8_t> debug_tail_{0};
     int pending_screenshot_frames_ = 0;
+    int pending_preview_stage_ = 0;
+    int pending_preview_frames_ = 0;
 };
 
 } // namespace

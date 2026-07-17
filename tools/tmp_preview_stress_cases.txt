@@ -1,0 +1,5 @@
+[[1,2,3],[4,5,6],[7,8,9]]
+[[sqrt(2),sqrt(3),sqrt(5)],[sqrt(7),sqrt(11),sqrt(13)],[sqrt(17),sqrt(19),sqrt(23)]]
+[[1/(x+1),sqrt((1+x^2)/(1-x)),((a+b)/(c+d))],[sum(k,k,1,n),x^2,((m+n)/(p+q))],[limit((sin(x))/x,x,0),sqrt((u+v)/(w-z)),((r+s)*(t+u))]]
+sqrt(((((a+b)/(c+d))+((e+f)/(g+h)))/(1+sqrt((i+j)/(k+l)))))
+(((((a+b)*((c-d)/(e+f)))+sqrt((g+h)/(i+j)))-((k+l)/(m+n)))^2)

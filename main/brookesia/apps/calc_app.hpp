@@ -18,6 +18,7 @@ public:
     void handleMappedKey(uint32_t key) override;
     void render() override;
     void debugSubmitFormula(const std::string &formula);
+    void debugEmitFormulaImage(const std::string &formula);
 
 private:
     xcas::XcasUi ui_;

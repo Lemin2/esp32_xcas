@@ -8,6 +8,7 @@
 #include "lvgl.h"
 
 #include "cardputer_bsp.hpp"
+#include "mathlayout/paint/math_painter.hpp"
 #include "xcas_service.hpp"
 
 namespace xcas
@@ -34,6 +35,7 @@ namespace xcas
         void show();
         void hide();
         void debugSubmitFormula(const std::string &formula);
+        void debugEmitFormulaImage(const std::string &formula);
 
     private:
         static constexpr int kFnRow = 2;
@@ -62,6 +64,18 @@ namespace xcas
         void moveHistorySelection(int delta);
         void selectHistoryIndex(int index, bool applyToInput);
         void submitInput();
+        void queueFormulaShot(std::vector<uint16_t> &&pixels, int width, int height);
+        void clearPendingFormulaShot();
+        void processPendingFormulaShot();
+        void setEditorFullscreen(bool enabled);
+        void refreshEditorPreview();
+        void openHistoryFullscreenPreview();
+        void closeHistoryFullscreenPreview();
+        void renderFullscreenPreview(const std::string &line);
+        void panFullscreenPreview(int dx, int dy);
+        void updateFullscreenPreviewPosition();
+        bool beginFullscreenPreviewPaint();
+        void stepFullscreenPreviewPaint(size_t max_commands, size_t max_line_commands);
 
         static std::string trimCopy(const std::string &s);
         static int findTopLevelChar(const std::string &s, char ch);
@@ -87,6 +101,11 @@ namespace xcas
         lv_obj_t *info_label_;
         lv_obj_t *history_panel_;
         lv_obj_t *history_list_;
+        lv_obj_t *editor_panel_;
+        lv_obj_t *editor_preview_host_;
+        lv_obj_t *editor_preview_canvas_;
+        lv_obj_t *editor_preview_label_;
+        lv_obj_t *editor_hint_label_;
         lv_obj_t *input_box_;
         lv_obj_t *ac_hint_label_;
         lv_obj_t *root_;
@@ -115,11 +134,30 @@ namespace xcas
         bool fn_toggled_;
         bool caps_toggled_;
         bool subjects_initialized_;
+        bool editor_fullscreen_ = false;
+
+        std::vector<uint16_t> pending_formula_shot_pixels_;
+        size_t pending_formula_shot_byte_offset_ = 0;
+        int pending_formula_shot_width_ = 0;
+        int pending_formula_shot_height_ = 0;
+        int64_t pending_formula_shot_started_us_ = 0;
+        int64_t pending_formula_shot_last_emit_us_ = 0;
+        bool pending_formula_shot_active_ = false;
 
         // Autocomplete
         std::vector<const char *> ac_candidates_;
         std::string ac_prefix_;
         int ac_index_ = 0;
+
+        bool preview_use_canvas_ = false;
+        int preview_content_w_ = 0;
+        int preview_content_h_ = 0;
+        int preview_pan_x_ = 0;
+        int preview_pan_y_ = 0;
+        bool preview_paint_pending_ = false;
+        mathlayout::DrawList preview_draw_list_;
+        mathlayout::ProgressivePaintState preview_paint_state_;
+        std::string preview_line_;
     };
 
 } // namespace xcas

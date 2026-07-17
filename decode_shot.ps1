@@ -6,6 +6,16 @@ param(
 Add-Type -AssemblyName System.Drawing
 
 $lines = Get-Content -Path $In
+$w = 240
+$h = 135
+foreach ($l in $lines) {
+    if ($l -match 'SHOT_BEGIN\s+w=(\d+)\s+h=(\d+)') {
+        $w = [int]$Matches[1]
+        $h = [int]$Matches[2]
+        break
+    }
+}
+
 $b64 = New-Object System.Text.StringBuilder
 foreach ($l in $lines) {
     $idx = $l.IndexOf('SHOT:')
@@ -19,7 +29,6 @@ Write-Output ("b64 chars=" + $s.Length)
 $bytes = [System.Convert]::FromBase64String($s)
 Write-Output ("decoded bytes=" + $bytes.Length)
 
-$w = 240; $h = 135
 $expected = $w * $h * 2
 if ($bytes.Length -lt $expected) {
     Write-Output ("WARNING: short by " + ($expected - $bytes.Length) + " bytes")

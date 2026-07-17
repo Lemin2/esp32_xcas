@@ -153,6 +153,23 @@ void Kernel::debugSubmitFormula(const char *formula)
     calc->debugSubmitFormula(formula);
 }
 
+void Kernel::debugEmitFormulaImage(const char *formula)
+{
+    if (formula == nullptr || formula[0] == '\0') {
+        return;
+    }
+
+    if (router_.current() != Route::Calc) {
+        switchTo(Route::Calc);
+    }
+
+    auto *calc = dynamic_cast<CalcApp *>(apps_[static_cast<size_t>(Route::Calc)].get());
+    if (calc == nullptr) {
+        return;
+    }
+    calc->debugEmitFormulaImage(formula);
+}
+
 void Kernel::requestScreenshot()
 {
     screenshot_pending_ = true;

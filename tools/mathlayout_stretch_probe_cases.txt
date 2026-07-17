@@ -1,0 +1,8 @@
+[[1,2],[3,4]]
+[[1/(x+1),sqrt(2)],[sum(k,k,1,n),x^2]]
+paren((1+x^2)/(1-x))
+bracket((1+x^2)/(1-x))
+brace((1+x^2)/(1-x))
+abs((1+x^2)/(1-x))
+sum(k^2,k,1,n)
+product(k,k,1,n)

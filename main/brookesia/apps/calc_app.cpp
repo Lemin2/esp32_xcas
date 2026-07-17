@@ -41,4 +41,9 @@ void CalcApp::debugSubmitFormula(const std::string &formula)
     ui_.debugSubmitFormula(formula);
 }
 
+void CalcApp::debugEmitFormulaImage(const std::string &formula)
+{
+    ui_.debugEmitFormulaImage(formula);
+}
+
 } // namespace brookesia

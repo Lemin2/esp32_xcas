@@ -9,13 +9,83 @@
 namespace xcas::mathlayout
 {
 
+namespace
+{
+
+constexpr const char *kSymMatLTop = u8"\uE100";
+constexpr const char *kSymMatLMid = u8"\uE101";
+constexpr const char *kSymMatLBot = u8"\uE102";
+constexpr const char *kSymMatRTop = u8"\uE103";
+constexpr const char *kSymMatRMid = u8"\uE104";
+constexpr const char *kSymMatRBot = u8"\uE105";
+
+constexpr const char *kSymSqrtStem = u8"\uE110";
+constexpr const char *kSymSqrtArm = u8"\uE111";
+constexpr const char *kSymSqrtHook = u8"\uE112";
+
+constexpr const char *kSymArrowRight = u8"\uE113";
+
+constexpr const char *kSymSigmaTop = u8"\uE120";
+constexpr const char *kSymSigmaMid = u8"\uE121";
+constexpr const char *kSymSigmaBot = u8"\uE122";
+constexpr const char *kSymPiTop = u8"\uE123";
+constexpr const char *kSymPiMid = u8"\uE124";
+constexpr const char *kSymPiBot = u8"\uE125";
+
+constexpr const char *kSymParenLTop = u8"\uE130";
+constexpr const char *kSymParenLMid = u8"\uE131";
+constexpr const char *kSymParenLBot = u8"\uE132";
+constexpr const char *kSymParenRTop = u8"\uE133";
+constexpr const char *kSymParenRMid = u8"\uE134";
+constexpr const char *kSymParenRBot = u8"\uE135";
+
+constexpr const char *kSymBrackLTop = u8"\uE136";
+constexpr const char *kSymBrackLMid = u8"\uE137";
+constexpr const char *kSymBrackLBot = u8"\uE138";
+constexpr const char *kSymBrackRTop = u8"\uE139";
+constexpr const char *kSymBrackRMid = u8"\uE13A";
+constexpr const char *kSymBrackRBot = u8"\uE13B";
+
+constexpr const char *kSymBraceLTop = u8"\uE13C";
+constexpr const char *kSymBraceLMid = u8"\uE13D";
+constexpr const char *kSymBraceLBot = u8"\uE13E";
+constexpr const char *kSymBraceRTop = u8"\uE13F";
+constexpr const char *kSymBraceRMid = u8"\uE140";
+constexpr const char *kSymBraceRBot = u8"\uE141";
+
+constexpr const char *kSymBarL = u8"\uE142";
+constexpr const char *kSymBarR = u8"\uE143";
+
+} // namespace
+
 // ── TextBox utilities ────────────────────────────────────────────────────────
+
+static size_t utf8CodepointCount(const std::string &s)
+{
+    size_t count = 0;
+    for (size_t i = 0; i < s.size();) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        size_t step = 1;
+        if ((c & 0x80U) == 0x00U) {
+            step = 1;
+        } else if ((c & 0xE0U) == 0xC0U) {
+            step = 2;
+        } else if ((c & 0xF0U) == 0xE0U) {
+            step = 3;
+        } else if ((c & 0xF8U) == 0xF0U) {
+            step = 4;
+        }
+        i += std::min(step, s.size() - i);
+        ++count;
+    }
+    return count;
+}
 
 int TextBox::width() const
 {
     int w = 0;
     for (const auto &l : lines) {
-        w = std::max(w, static_cast<int>(l.size()));
+        w = std::max(w, static_cast<int>(utf8CodepointCount(l)));
     }
     return w;
 }
@@ -23,7 +93,7 @@ int TextBox::width() const
 static void padRight(TextBox &box, int target_w)
 {
     for (auto &l : box.lines) {
-        while (static_cast<int>(l.size()) < target_w) {
+        while (static_cast<int>(utf8CodepointCount(l)) < target_w) {
             l += ' ';
         }
     }
@@ -195,21 +265,66 @@ static std::vector<std::string> splitArgs(const std::string &s)
     return args;
 }
 
+enum class DelimKind
+{
+    Paren,
+    Bracket,
+    Brace,
+    Bar,
+};
+
+static TextBox makeDelimited(TextBox inner, DelimKind kind)
+{
+    if (inner.height() <= 1) {
+        if (kind == DelimKind::Paren) return hcat(hcat(makeText("("), inner), makeText(")"));
+        if (kind == DelimKind::Bracket) return hcat(hcat(makeText("["), inner), makeText("]"));
+        if (kind == DelimKind::Brace) return hcat(hcat(makeText("{"), inner), makeText("}"));
+        return hcat(hcat(makeText("|"), inner), makeText("|"));
+    }
+
+    TextBox lb;
+    TextBox rb;
+    lb.baseline = inner.baseline;
+    rb.baseline = inner.baseline;
+
+    for (int i = 0; i < inner.height(); ++i) {
+        const bool top = (i == 0);
+        const bool bot = (i + 1 == inner.height());
+
+        if (kind == DelimKind::Paren) {
+            lb.lines.push_back(top ? kSymParenLTop : (bot ? kSymParenLBot : kSymParenLMid));
+            rb.lines.push_back(top ? kSymParenRTop : (bot ? kSymParenRBot : kSymParenRMid));
+        } else if (kind == DelimKind::Bracket) {
+            lb.lines.push_back(top ? kSymBrackLTop : (bot ? kSymBrackLBot : kSymBrackLMid));
+            rb.lines.push_back(top ? kSymBrackRTop : (bot ? kSymBrackRBot : kSymBrackRMid));
+        } else if (kind == DelimKind::Brace) {
+            lb.lines.push_back(top ? kSymBraceLTop : (bot ? kSymBraceLBot : kSymBraceLMid));
+            rb.lines.push_back(top ? kSymBraceRTop : (bot ? kSymBraceRBot : kSymBraceRMid));
+        } else {
+            lb.lines.push_back(kSymBarL);
+            rb.lines.push_back(kSymBarR);
+        }
+    }
+
+    return hcat(hcat(lb, inner), rb);
+}
+
 // ── Fraction ─────────────────────────────────────────────────────────────────
 static TextBox makeFrac(const TextBox &num, const TextBox &den)
 {
     const int nw = num.width(), dw = den.width();
     const int w = std::max(nw, dw) + 2;
     auto center = [&](const std::string &t, int target) {
-        const int pad = target - static_cast<int>(t.size());
+        const int pad = target - static_cast<int>(utf8CodepointCount(t));
         const int l = pad / 2, r = pad - l;
         return std::string(static_cast<size_t>(std::max(0, l)), ' ') + t
              + std::string(static_cast<size_t>(std::max(0, r)), ' ');
     };
     TextBox out;
-    out.baseline = static_cast<int>(num.lines.size()); // fraction bar row
+    out.baseline = static_cast<int>(num.lines.size()) + 1; // fraction bar row
     for (const auto &l : num.lines) out.lines.push_back(center(localTrim(l), w));
-    out.lines.push_back(std::string(static_cast<size_t>(std::max(0, w)), '-'));
+    out.lines.push_back(std::string(static_cast<size_t>(std::max(0, w)), ' '));
+    out.lines.push_back(std::string(static_cast<size_t>(std::max(0, w)), '_'));
     for (const auto &l : den.lines) out.lines.push_back(center(localTrim(l), w));
     return out;
 }
@@ -261,9 +376,137 @@ static TextBox makeSqrt(TextBox inner)
     out.lines.push_back("  " + std::string(static_cast<size_t>(std::max(0, iw)), '_'));
     // body rows: prepend radical symbol column
     for (int i = 0; i < ih; ++i) {
-        const bool is_baseline = (i == inner.baseline);
-        out.lines.push_back((is_baseline ? "\\/" : " |") + inner.lines[static_cast<size_t>(i)]);
+        std::string lead = std::string(kSymSqrtStem) + " ";
+        if (i + 1 == inner.baseline) {
+            lead = std::string(kSymSqrtArm) + " ";
+        }
+        if (i == inner.baseline) {
+            lead = std::string(kSymSqrtHook) + " ";
+        }
+        out.lines.push_back(lead + inner.lines[static_cast<size_t>(i)]);
     }
+    return out;
+}
+
+static TextBox makeBigOperator(const TextBox &hi,
+                               const TextBox &op_box,
+                               const TextBox &lo,
+                               const TextBox &body)
+{
+    const int col_w = std::max({hi.width(), op_box.width(), lo.width(), 3});
+
+    auto center_line = [col_w](const std::string &line) {
+        const int glyph_w = static_cast<int>(utf8CodepointCount(line));
+        const int pad = std::max(0, col_w - glyph_w);
+        const int lp = pad / 2;
+        const int rp = pad - lp;
+        return std::string(static_cast<size_t>(lp), ' ') + line + std::string(static_cast<size_t>(rp), ' ');
+    };
+
+    TextBox op_col;
+    for (const auto &line : hi.lines) {
+        op_col.lines.push_back(center_line(localTrim(line)));
+    }
+    for (const auto &line : op_box.lines) {
+        op_col.lines.push_back(center_line(line));
+    }
+    for (const auto &line : lo.lines) {
+        op_col.lines.push_back(center_line(localTrim(line)));
+    }
+    op_col.baseline = hi.height() + std::clamp(op_box.baseline, 0, std::max(0, op_box.height() - 1));
+
+    return hcat(hcat(op_col, makeText(" ")), body);
+}
+
+static TextBox makeSigmaOperatorBox()
+{
+    TextBox op;
+    op.lines = {
+        kSymSigmaTop,
+        kSymSigmaMid,
+        kSymSigmaMid,
+        kSymSigmaMid,
+        kSymSigmaBot,
+    };
+    op.baseline = 2;
+    return op;
+}
+
+static TextBox makeSigmaOperatorBoxCompact()
+{
+    TextBox op;
+    op.lines = {
+        kSymSigmaTop,
+        kSymSigmaMid,
+        kSymSigmaBot,
+    };
+    op.baseline = 1;
+    return op;
+}
+
+static TextBox makePiOperatorBox()
+{
+    TextBox op;
+    op.lines = {
+        kSymPiTop,
+        kSymPiMid,
+        kSymPiMid,
+        kSymPiMid,
+        kSymPiBot,
+    };
+    op.baseline = 2;
+    return op;
+}
+
+static TextBox makePiOperatorBoxCompact()
+{
+    TextBox op;
+    op.lines = {
+        kSymPiTop,
+        kSymPiMid,
+        kSymPiBot,
+    };
+    op.baseline = 1;
+    return op;
+}
+
+static TextBox makeVector(const std::vector<TextBox> &elements)
+{
+    if (elements.empty()) {
+        return makeText("[]");
+    }
+
+    int content_w = 1;
+    for (const auto &el : elements) {
+        content_w = std::max(content_w, el.width());
+    }
+
+    const int middle = static_cast<int>(elements.size() / 2U);
+    TextBox out;
+    out.baseline = 0;
+    int row_cursor = 0;
+
+    for (size_t r = 0; r < elements.size(); ++r) {
+        TextBox cell = elements[r];
+        padRight(cell, content_w);
+
+        const bool top = (r == 0U);
+        const bool bottom = (r + 1U == elements.size());
+        const std::string lb = top ? kSymMatLTop : (bottom ? kSymMatLBot : kSymMatLMid);
+        const std::string rb = top ? kSymMatRTop : (bottom ? kSymMatRBot : kSymMatRMid);
+
+        for (int i = 0; i < cell.height(); ++i) {
+            out.lines.push_back(lb + std::string(" ") + cell.lines[static_cast<size_t>(i)] + " " + rb);
+        }
+
+        if (static_cast<int>(r) < middle) {
+            row_cursor += cell.height();
+        } else if (static_cast<int>(r) == middle) {
+            out.baseline = row_cursor + std::clamp(cell.baseline, 0, std::max(0, cell.height() - 1));
+            row_cursor += cell.height();
+        }
+    }
+
     return out;
 }
 
@@ -353,6 +596,31 @@ TextBox renderText(const std::string &expr, int depth)
         }
     }
 
+    // |expr| absolute-value style delimiter
+    if (s.size() >= 2 && s.front() == '|' && s.back() == '|') {
+        int depth = 0;
+        bool ok = true;
+        for (size_t i = 1; i + 1 < s.size(); ++i) {
+            const char c = s[i];
+            if (c == '(' || c == '[' || c == '{') {
+                ++depth;
+            } else if (c == ')' || c == ']' || c == '}') {
+                --depth;
+            } else if (c == '|' && depth == 0) {
+                ok = false;
+                break;
+            }
+            if (depth < 0) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok) {
+            TextBox inner = renderText(s.substr(1, s.size() - 2), depth + 1);
+            return makeDelimited(inner, DelimKind::Bar);
+        }
+    }
+
     // Function call: name(args...)
     {
         const size_t lp = s.find('(');
@@ -367,10 +635,6 @@ TextBox renderText(const std::string &expr, int depth)
 
             // ── D1: sum(body, var, lo, hi) ──────────────────────────────────
             if ((fn == "sum" || fn == "sigma") && args.size() >= 4) {
-                // Layout:
-                //   hi
-                //   Σ  body        ← baseline
-                //   var=lo
                 const std::string body_s = localTrim(args[0]);
                 const std::string var_s  = localTrim(args[1]);
                 const std::string lo_s   = localTrim(args[2]);
@@ -378,21 +642,10 @@ TextBox renderText(const std::string &expr, int depth)
                 TextBox body = renderText(body_s, depth + 1);
                 TextBox hi   = renderText(hi_s,   depth + 1);
                 TextBox lo_v = renderText(var_s + "=" + lo_s, depth + 1);
-                // sigma column: hi / Sigma / lo
-                const int sym_w = std::max({hi.width(), 1, lo_v.width()});
-                auto centerStr = [&](const TextBox &b, int w) {
-                    std::string flat;
-                    for (const auto &l : b.lines) flat += localTrim(l);
-                    const int pad = w - static_cast<int>(flat.size());
-                    const int lp = std::max(0, pad / 2), rp = std::max(0, pad - lp);
-                    return std::string(static_cast<size_t>(lp), ' ') + flat + std::string(static_cast<size_t>(rp), ' ');
-                };
-                TextBox sigma;
-                sigma.lines.push_back(centerStr(hi,   sym_w));
-                sigma.lines.push_back(centerStr(makeText("S"), sym_w)); // 'S' for Sigma
-                sigma.lines.push_back(centerStr(lo_v, sym_w));
-                sigma.baseline = 1; // Sigma row
-                return hcat(hcat(sigma, makeText(" ")), body);
+                return makeBigOperator(hi,
+                                       depth >= 2 ? makeSigmaOperatorBoxCompact() : makeSigmaOperatorBox(),
+                                       lo_v,
+                                       body);
             }
 
             // ── D1: product(body, var, lo, hi) ──────────────────────────────
@@ -404,20 +657,10 @@ TextBox renderText(const std::string &expr, int depth)
                 TextBox body = renderText(body_s, depth + 1);
                 TextBox hi   = renderText(hi_s,   depth + 1);
                 TextBox lo_v = renderText(var_s + "=" + lo_s, depth + 1);
-                const int sym_w = std::max({hi.width(), 1, lo_v.width()});
-                auto centerStr = [&](const TextBox &b, int w) {
-                    std::string flat;
-                    for (const auto &l : b.lines) flat += localTrim(l);
-                    const int pad = w - static_cast<int>(flat.size());
-                    const int lp = std::max(0, pad / 2), rp = std::max(0, pad - lp);
-                    return std::string(static_cast<size_t>(lp), ' ') + flat + std::string(static_cast<size_t>(rp), ' ');
-                };
-                TextBox pi_box;
-                pi_box.lines.push_back(centerStr(hi,   sym_w));
-                pi_box.lines.push_back(centerStr(makeText("P"), sym_w)); // 'P' for Pi
-                pi_box.lines.push_back(centerStr(lo_v, sym_w));
-                pi_box.baseline = 1;
-                return hcat(hcat(pi_box, makeText(" ")), body);
+                return makeBigOperator(hi,
+                                       depth >= 2 ? makePiOperatorBoxCompact() : makePiOperatorBox(),
+                                       lo_v,
+                                       body);
             }
 
             // ── D2: limit(body, var, approach) ──────────────────────────────
@@ -429,7 +672,7 @@ TextBox renderText(const std::string &expr, int depth)
                 const std::string var_s  = localTrim(args[1]);
                 const std::string at_s   = localTrim(args[2]);
                 TextBox body    = renderText(body_s,            depth + 1);
-                TextBox under   = makeText(var_s + "->" + at_s);
+                TextBox under   = makeText(var_s + kSymArrowRight + at_s);
                 // lim column: "lim" on top, limit subscript below
                 const int col_w = std::max(3, under.width());
                 auto centerLine = [](const std::string &t, int w) {
@@ -506,17 +749,16 @@ TextBox renderText(const std::string &expr, int depth)
                         row_h[r] = std::max(row_h[r], cell.height());
                 const int total_h = [&]{ int h=0; for(int v:row_h) h+=v; return h; }();
                 TextBox mat;
-                mat.baseline = total_h / 2; // will be adjusted below for sep rows
+                mat.baseline = total_h / 2;
                 int abs_row = 0;
-                int baseline_adj = 0; // how many sep rows fall before baseline
                 for (size_t r = 0; r < nrows; ++r) {
                     const bool is_first_content_row = (r == 0);
                     const bool is_last_content_row  = (r + 1 == nrows);
                     for (int sub = 0; sub < row_h[r]; ++sub) {
                         const bool is_first_abs = (is_first_content_row && sub == 0);
                         const bool is_last_abs  = (is_last_content_row  && sub == row_h[r] - 1);
-                        const char *lb = is_first_abs ? "/" : (is_last_abs ? "\\" : "|");
-                        const char *rb = is_first_abs ? "\\" : (is_last_abs ? "/" : "|");
+                        const char *lb = is_first_abs ? kSymMatLTop : (is_last_abs ? kSymMatLBot : kSymMatLMid);
+                        const char *rb = is_first_abs ? kSymMatRTop : (is_last_abs ? kSymMatRBot : kSymMatRMid);
                         std::string line;
                         line += lb;
                         line += " ";
@@ -530,35 +772,18 @@ TextBox renderText(const std::string &expr, int depth)
                                 const int ci = sub - top_pad;
                                 cell_line = ci < cell.height()
                                     ? cell.lines[static_cast<size_t>(ci)] : "";
-                                while (static_cast<int>(cell_line.size()) < col_w[c])
+                                while (utf8CodepointCount(cell_line) < static_cast<size_t>(col_w[c]))
                                     cell_line += ' ';
                             }
                             line += cell_line;
-                            if (c + 1 < ncols) line += " | ";
+                            if (c + 1 < ncols) line += "  ";
                         }
                         line += " ";
                         line += rb;
                         mat.lines.push_back(line);
                         ++abs_row;
                     }
-                    // Horizontal row separator between matrix rows (not after last row)
-                    if (r + 1 < nrows) {
-                        std::string sep_line;
-                        sep_line += "|";
-                        sep_line += "-";
-                        for (size_t c = 0; c < ncols; ++c) {
-                            sep_line += std::string(static_cast<size_t>(col_w[c]), '-');
-                            if (c + 1 < ncols) sep_line += "-+-";
-                        }
-                        sep_line += "-";
-                        sep_line += "|";
-                        mat.lines.push_back(sep_line);
-                        // If this separator falls before the baseline, push baseline down
-                        if (abs_row <= total_h / 2) ++baseline_adj;
-                        ++abs_row;
-                    }
                 }
-                mat.baseline = total_h / 2 + baseline_adj;
                 return mat;
             }
 
@@ -566,18 +791,19 @@ TextBox renderText(const std::string &expr, int depth)
             // (handled transparently by the outer-paren strip above for single-
             //  arg calls; explicit "paren(expr)" form for testing)
             if (fn == "paren" && args.size() == 1) {
-                TextBox inner = renderText(args[0], depth + 1);
-                const int h = inner.height();
-                if (h <= 1) return hcat(hcat(makeText("("), inner), makeText(")"));
-                // Build tall bracket column
-                TextBox lb, rb;
-                for (int i = 0; i < h; ++i) {
-                    lb.lines.push_back(i == 0 ? "/" : (i + 1 == h ? "\\" : "|"));
-                    rb.lines.push_back(i == 0 ? "\\" : (i + 1 == h ? "/" : "|"));
-                }
-                lb.baseline = inner.baseline;
-                rb.baseline = inner.baseline;
-                return hcat(hcat(lb, inner), rb);
+                return makeDelimited(renderText(args[0], depth + 1), DelimKind::Paren);
+            }
+
+            if ((fn == "bracket" || fn == "sq") && args.size() == 1) {
+                return makeDelimited(renderText(args[0], depth + 1), DelimKind::Bracket);
+            }
+
+            if ((fn == "brace" || fn == "curly") && args.size() == 1) {
+                return makeDelimited(renderText(args[0], depth + 1), DelimKind::Brace);
+            }
+
+            if ((fn == "abs" || fn == "norm") && args.size() == 1) {
+                return makeDelimited(renderText(args[0], depth + 1), DelimKind::Bar);
             }
             TextBox result = makeText(fn + "(");
             for (size_t k = 0; k < args.size(); ++k) {
@@ -593,6 +819,21 @@ TextBox renderText(const std::string &expr, int depth)
     if (s.size() >= 4 && s.front() == '[' && s[1] == '[' &&
         s.back() == ']' && s[s.size() - 2] == ']') {
         return renderText("matrix(" + s + ")", depth + 1);
+    }
+
+    // [a,b,c] vector literal (single-bracket list)
+    if (s.size() >= 2 && s.front() == '[' && s.back() == ']') {
+        const std::string inner = localTrim(s.substr(1, s.size() - 2));
+        if (inner.empty()) {
+            return makeText("[]");
+        }
+        std::vector<std::string> elems_src = splitArgs(inner);
+        std::vector<TextBox> elems;
+        elems.reserve(elems_src.size());
+        for (const auto &src : elems_src) {
+            elems.push_back(renderText(src, depth + 1));
+        }
+        return makeVector(elems);
     }
 
     // Atom

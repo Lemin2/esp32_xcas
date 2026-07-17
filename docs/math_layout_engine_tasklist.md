@@ -406,9 +406,43 @@
 - 遗留问题：
   - 分式和根号均为内联文本形式，非真正二维排版（受 lv_label 限制）。
 
+#### 2026-07-15 / 迭代 8（D1 + D2 + D3 + D4 + E1 + F1）
+
+- 本轮完成项：
+  - [x] D1 大运算符（求和/求积）布局
+  - [x] D2 极限布局
+  - [x] D3 矩阵布局
+  - [x] D4 可伸缩括号
+  - [x] E1 绘制命令层
+  - [x] F1 在 XcasUi 中接入新引擎
+- 变更文件：
+  - `main/mathlayout/render/text_renderer.cpp`
+  - `main/mathlayout/paint/math_painter.hpp`
+  - `main/mathlayout/paint/math_painter.cpp`
+  - `main/xcas_ui.hpp`
+  - `main/xcas_ui.cpp`
+  - `main/app_main.cpp`
+  - `tools/serial_formula_render_capture.ps1`
+- 验收公式与结果：
+  - `sum(k,k,1,n)`、`product(k,k,1,n)`：大算符上下限与主体按结构布局。
+  - `limit((sin(x))/x,x,0)`：`lim` 与趋近标注分层显示。
+  - `[[1/(x+1),sqrt(2)],[sum(k,k,1,n),x^2]]`：矩阵行列对齐与可伸缩边界可见。
+  - `brace((1+x^2)/(1-x))`、`abs((1+x^2)/(1-x))`：可伸缩括号/竖线按高度扩展。
+- 本轮 UI 进展：
+  - 历史气泡结果项已接入 `math_canvas` 绘制路径。
+  - 新增全屏公式编辑/显示界面（Formula Studio），提供实时自然书写预览并支持与历史视图切换。
+  - 切换方式：`Fn+\``（映射 `Esc`）。
+- 稳定性补充：
+  - `ML RENDER_SHOT` 已避开 UI 线程阻塞路径，消除此前光标卡死根因。
+  - 串口抓图脚本新增 ready 握手，降低开串口后首条命令丢失概率。
+- 遗留问题：
+  - 预览路径仍缺少 glyph 级精细位图渲染（当前以结构优先）。
+  - 尚未引入布局缓存与增量布局（E2/E3）。
+  - 尚未增加 `CONFIG_XCAS_MATH_LAYOUT_ENGINE` 回退开关（F2）。
+
 ---
 
-## 5. 任务状态看板（初始）
+## 5. 任务状态看板（当前）
 
 - [x] A1 定义数学 AST 与节点类型
 - [x] A2 定义布局盒模型
@@ -420,15 +454,15 @@
 - [x] C1 上下标布局
 - [x] C2 分式布局
 - [x] C3 根号布局
-- [ ] D1 求和/求积布局
-- [ ] D2 极限布局
-- [ ] D3 矩阵布局
-- [ ] D4 可伸缩括号
-- [ ] E1 绘制命令层
+- [x] D1 求和/求积布局
+- [x] D2 极限布局
+- [x] D3 矩阵布局
+- [x] D4 可伸缩括号
+- [x] E1 绘制命令层
 - [ ] E2 缓存体系
 - [ ] E3 增量布局
 - [ ] E4 回归测试
-- [ ] F1 接入 XcasUi
+- [x] F1 接入 XcasUi
 - [ ] F2 调试开关
 - [ ] F3 设备端验收
 

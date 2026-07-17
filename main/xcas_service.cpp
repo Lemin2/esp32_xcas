@@ -153,11 +153,11 @@ std::string insertImplicitMultiplication(const std::string &src)
             i = j;
         } else if (c == '(' || c == '[') {
             cur = TokType::LParen;
-            token.push_back(c == '[' ? '(' : c);
+            token.push_back(c);
             ++i;
         } else if (c == ')' || c == ']') {
             cur = TokType::RParen;
-            token.push_back(c == ']' ? ')' : c);
+            token.push_back(c);
             ++i;
         } else if (c == ',') {
             cur = TokType::Comma;

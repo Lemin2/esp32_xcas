@@ -680,9 +680,46 @@ void GraphApp::rebuildPlotTickLabels()
     lv_line_set_points(axis_x_, axis_x_pts_.data(), 2);
     lv_line_set_points(axis_y_, axis_y_pts_.data(), 2);
 
-    float start_x = std::ceil(plot_x_min_ / x_step) * x_step;
+    auto pickTickValues = [&](float min_v, float max_v, float step) {
+        std::vector<float> values;
+        if (!(step > 0.0f) || !(max_v >= min_v)) {
+            return values;
+        }
+        const float start = std::ceil(min_v / step) * step;
+        if (start > max_v) {
+            return values;
+        }
+
+        int total = static_cast<int>(std::floor((max_v - start) / step)) + 1;
+        if (total <= 0) {
+            return values;
+        }
+
+        if (total <= kMaxTicks) {
+            values.reserve(static_cast<size_t>(total));
+            for (int i = 0; i < total; ++i) {
+                values.push_back(start + static_cast<float>(i) * step);
+            }
+            return values;
+        }
+
+        values.reserve(kMaxTicks);
+        for (int i = 0; i < kMaxTicks; ++i) {
+            const float t = (kMaxTicks > 1)
+                                ? static_cast<float>(i) / static_cast<float>(kMaxTicks - 1)
+                                : 0.0f;
+            const int sample_idx = static_cast<int>(std::round(t * static_cast<float>(total - 1)));
+            values.push_back(start + static_cast<float>(sample_idx) * step);
+        }
+        return values;
+    };
+
+    const auto x_ticks = pickTickValues(plot_x_min_, plot_x_max_, x_step);
     int idx = 0;
-    for (float x = start_x; x <= plot_x_max_ && idx < kMaxTicks; x += x_step, ++idx) {
+    for (float x : x_ticks) {
+        if (idx >= kMaxTicks) {
+            break;
+        }
         int px = xToPlot(x);
         tick_pts_x_[idx][0] = {static_cast<lv_value_precise_t>(px), static_cast<lv_value_precise_t>(axis_y - 3)};
         tick_pts_x_[idx][1] = {static_cast<lv_value_precise_t>(px), static_cast<lv_value_precise_t>(axis_y + 3)};
@@ -691,17 +728,23 @@ void GraphApp::rebuildPlotTickLabels()
         char buf[24];
         std::snprintf(buf, sizeof(buf), "%.2g", static_cast<double>(x));
         lv_label_set_text(x_tick_labels_[idx], buf);
-        lv_obj_set_pos(x_tick_labels_[idx], px - 12, std::min(axis_y + 4, kRootH - 14));
+        const int label_x = std::clamp(px - 12, 0, kDisplayW - 26);
+        const int label_y = std::clamp(axis_y + 4, 0, kRootH - 14);
+        lv_obj_set_pos(x_tick_labels_[idx], label_x, label_y);
         lv_obj_clear_flag(x_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
+        ++idx;
     }
     for (; idx < kMaxTicks; ++idx) {
         lv_obj_add_flag(x_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(x_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
     }
 
-    float start_y = std::ceil(plot_y_min_ / y_step) * y_step;
+    const auto y_ticks = pickTickValues(plot_y_min_, plot_y_max_, y_step);
     idx = 0;
-    for (float y = start_y; y <= plot_y_max_ && idx < kMaxTicks; y += y_step, ++idx) {
+    for (float y : y_ticks) {
+        if (idx >= kMaxTicks) {
+            break;
+        }
         int py = yToPlot(y);
         tick_pts_y_[idx][0] = {static_cast<lv_value_precise_t>(axis_x - 3), static_cast<lv_value_precise_t>(py)};
         tick_pts_y_[idx][1] = {static_cast<lv_value_precise_t>(axis_x + 3), static_cast<lv_value_precise_t>(py)};
@@ -710,8 +753,11 @@ void GraphApp::rebuildPlotTickLabels()
         char buf[24];
         std::snprintf(buf, sizeof(buf), "%.2g", static_cast<double>(y));
         lv_label_set_text(y_tick_labels_[idx], buf);
-        lv_obj_set_pos(y_tick_labels_[idx], std::min(axis_x + 4, kDisplayW - 30), py - 8);
+        const int label_x = std::clamp(axis_x + 4, 0, kDisplayW - 30);
+        const int label_y = std::clamp(py - 8, 0, kRootH - 14);
+        lv_obj_set_pos(y_tick_labels_[idx], label_x, label_y);
         lv_obj_clear_flag(y_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
+        ++idx;
     }
     for (; idx < kMaxTicks; ++idx) {
         lv_obj_add_flag(y_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);

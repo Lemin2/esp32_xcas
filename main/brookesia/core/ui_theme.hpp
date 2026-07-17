@@ -31,5 +31,7 @@ void applyRowCard(lv_obj_t *obj,
                   lv_coord_t pad_right = 8);
 void applyText14(lv_obj_t *obj);
 void applyText16(lv_obj_t *obj);
+const lv_font_t *textFont14();
+const lv_font_t *textFont16();
 
 } // namespace brookesia::ui_theme
