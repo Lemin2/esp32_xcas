@@ -220,6 +220,8 @@ private:
         ESP_LOGI(kTag, "ui task alive");
         TickType_t last_wake = xTaskGetTickCount();
         for (;;) {
+            kernel_.setModifierState(fn_active_.load(std::memory_order_relaxed),
+                                     shift_active_.load(std::memory_order_relaxed));
             kernel_.handleKeyboardState(keyboard_state_.load(std::memory_order_relaxed));
             uint32_t key = 0;
             while (popMappedKey(key)) {
@@ -265,6 +267,8 @@ private:
 
             const bool fn_active = ((raw_mask & kFnBit) != 0U) || fn_latched;
             const bool shift_active = ((raw_mask & kShiftBit) != 0U) || shift_latched;
+            fn_active_.store(fn_active, std::memory_order_relaxed);
+            shift_active_.store(shift_active, std::memory_order_relaxed);
 
             for (int idx = 0; idx < 56; ++idx) {
                 const uint64_t bit = (1ULL << idx);
@@ -526,6 +530,8 @@ private:
 
     brookesia::Kernel kernel_{};
     std::atomic<uint64_t> keyboard_state_{0};
+    std::atomic<bool> fn_active_{false};
+    std::atomic<bool> shift_active_{false};
     std::array<uint32_t, 64> mapped_keys_{};
     std::atomic<uint8_t> mapped_head_{0};
     std::atomic<uint8_t> mapped_tail_{0};

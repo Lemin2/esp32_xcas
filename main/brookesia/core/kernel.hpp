@@ -18,6 +18,7 @@ public:
 
     bool start();
     uint64_t scanKeyboardState();
+    void setModifierState(bool fnActive, bool shiftActive);
     void handleKeyboardState(uint64_t pressedMask);
     void handleMappedKey(uint32_t key);
     void debugSubmitFormula(const char *formula);

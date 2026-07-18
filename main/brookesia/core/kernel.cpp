@@ -105,18 +105,17 @@ uint64_t Kernel::scanKeyboardState()
     return board_.scanKeyboardState();
 }
 
+void Kernel::setModifierState(bool fnActive, bool shiftActive)
+{
+    fn_locked_ = fnActive;
+    shift_locked_ = shiftActive;
+}
+
 void Kernel::handleKeyboardState(uint64_t pressedMask)
 {
     const uint64_t newly_pressed = pressedMask & ~previous_key_mask_;
     previous_key_mask_ = pressedMask;
     current_key_mask_ = pressedMask;
-
-    if ((newly_pressed & kFnBit) != 0U) {
-        fn_locked_ = !fn_locked_;
-    }
-    if ((newly_pressed & kShiftBit) != 0U) {
-        shift_locked_ = !shift_locked_;
-    }
 
     constexpr uint64_t kScreenshotBit = (1ULL << 24); // 'p'
     if (fn_locked_ && ((newly_pressed & kScreenshotBit) != 0U)) {
