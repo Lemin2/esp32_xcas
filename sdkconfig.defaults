@@ -28,7 +28,23 @@ CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
 # property interface explicitly so UI can use property-based updates.
 CONFIG_LV_USE_OBJ_PROPERTY=y
 
+# Use the ESP-IDF/libc heap for LVGL allocations instead of LVGL's fixed
+# builtin TLSF pool, so UI objects are backed by the system heap/PSRAM policy.
+CONFIG_LV_USE_CLIB_MALLOC=y
+
 # Use Source Han Sans SC as the default built-in LVGL font set.
 CONFIG_LV_FONT_SOURCE_HAN_SANS_SC_14_CJK=y
 CONFIG_LV_FONT_SOURCE_HAN_SANS_SC_16_CJK=y
 CONFIG_LV_FONT_DEFAULT_SOURCE_HAN_SANS_SC_14_CJK=y
+
+# Auto-detect PSRAM when present, but keep booting on boards without it.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_BOOT_HW_INIT=y
+CONFIG_SPIRAM_BOOT_INIT=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768

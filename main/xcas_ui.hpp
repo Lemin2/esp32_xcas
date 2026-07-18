@@ -34,6 +34,7 @@ namespace xcas
         void render();
         void show();
         void hide();
+        void releaseUi();
         void debugSubmitFormula(const std::string &formula);
         void debugEmitFormulaImage(const std::string &formula);
 

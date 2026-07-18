@@ -11,7 +11,9 @@ public:
     virtual bool init() = 0;
     virtual void onFocus() {}
     virtual void onBlur() {}
+    virtual void releaseUi() {}
     virtual void onSuspend() {}
+    virtual bool handleMenuButton() { return false; }
     virtual void handleKeyboardState(uint64_t pressedMask) = 0;
     virtual void handleMappedKey(uint32_t key) { (void)key; }
     virtual void render() = 0;

@@ -52,6 +52,21 @@ void clampSettings(AppSettings &v)
     if (v.digits_index < 0 || v.digits_index > 3) {
         v.digits_index = 0;
     }
+    if (v.clock_year < 2024 || v.clock_year > 2099) {
+        v.clock_year = 2026;
+    }
+    if (v.clock_month < 1 || v.clock_month > 12) {
+        v.clock_month = 1;
+    }
+    if (v.clock_day < 1 || v.clock_day > 31) {
+        v.clock_day = 1;
+    }
+    if (v.clock_hour < 0 || v.clock_hour > 23) {
+        v.clock_hour = 0;
+    }
+    if (v.clock_minute < 0 || v.clock_minute > 59) {
+        v.clock_minute = 0;
+    }
 }
 
 } // namespace
@@ -94,6 +109,26 @@ void load()
             s_settings.wifi_enabled = parseBool(value);
         } else if (std::strcmp(key, "bt_hid_enabled") == 0) {
             s_settings.bt_hid_enabled = parseBool(value);
+        } else if (std::strcmp(key, "status_show_wifi") == 0) {
+            s_settings.status_show_wifi = parseBool(value);
+        } else if (std::strcmp(key, "status_show_bt") == 0) {
+            s_settings.status_show_bt = parseBool(value);
+        } else if (std::strcmp(key, "status_show_memory") == 0) {
+            s_settings.status_show_memory = parseBool(value);
+        } else if (std::strcmp(key, "status_memory_mb") == 0) {
+            s_settings.status_memory_mb = parseBool(value);
+        } else if (std::strcmp(key, "status_show_clock") == 0) {
+            s_settings.status_show_clock = parseBool(value);
+        } else if (std::strcmp(key, "clock_year") == 0) {
+            s_settings.clock_year = std::atoi(value);
+        } else if (std::strcmp(key, "clock_month") == 0) {
+            s_settings.clock_month = std::atoi(value);
+        } else if (std::strcmp(key, "clock_day") == 0) {
+            s_settings.clock_day = std::atoi(value);
+        } else if (std::strcmp(key, "clock_hour") == 0) {
+            s_settings.clock_hour = std::atoi(value);
+        } else if (std::strcmp(key, "clock_minute") == 0) {
+            s_settings.clock_minute = std::atoi(value);
         } else if (std::strcmp(key, "wifi_ssid") == 0) {
             std::snprintf(s_settings.wifi_ssid, sizeof(s_settings.wifi_ssid), "%s", value);
         } else if (std::strcmp(key, "wifi_pass") == 0) {
@@ -124,6 +159,16 @@ bool save()
     std::fprintf(f, "fn_app_switch=%d\n", s_settings.fn_app_switch_enabled ? 1 : 0);
     std::fprintf(f, "wifi_enabled=%d\n", s_settings.wifi_enabled ? 1 : 0);
     std::fprintf(f, "bt_hid_enabled=%d\n", s_settings.bt_hid_enabled ? 1 : 0);
+    std::fprintf(f, "status_show_wifi=%d\n", s_settings.status_show_wifi ? 1 : 0);
+    std::fprintf(f, "status_show_bt=%d\n", s_settings.status_show_bt ? 1 : 0);
+    std::fprintf(f, "status_show_memory=%d\n", s_settings.status_show_memory ? 1 : 0);
+    std::fprintf(f, "status_memory_mb=%d\n", s_settings.status_memory_mb ? 1 : 0);
+    std::fprintf(f, "status_show_clock=%d\n", s_settings.status_show_clock ? 1 : 0);
+    std::fprintf(f, "clock_year=%d\n", s_settings.clock_year);
+    std::fprintf(f, "clock_month=%d\n", s_settings.clock_month);
+    std::fprintf(f, "clock_day=%d\n", s_settings.clock_day);
+    std::fprintf(f, "clock_hour=%d\n", s_settings.clock_hour);
+    std::fprintf(f, "clock_minute=%d\n", s_settings.clock_minute);
     std::fprintf(f, "wifi_ssid=%s\n", s_settings.wifi_ssid);
     std::fprintf(f, "wifi_pass=%s\n", s_settings.wifi_pass);
     std::fclose(f);

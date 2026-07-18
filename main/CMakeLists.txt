@@ -39,11 +39,18 @@ set(XCAS_PRIV_REQUIRES
     esp_driver_sdmmc
     esp_timer
     fatfs
-    littlefs
-    esp_event
-    esp_netif
-    esp_wifi
-    bt)
+    littlefs)
+
+if(CONFIG_XCAS_ENABLE_WIFI)
+    list(APPEND XCAS_PRIV_REQUIRES
+         esp_event
+         esp_netif
+         esp_wifi)
+endif()
+
+if(CONFIG_XCAS_ENABLE_BLUETOOTH)
+    list(APPEND XCAS_PRIV_REQUIRES bt)
+endif()
 
 if(XCAS_ENABLE_CONSOLE_MAIN)
     list(APPEND XCAS_SRCS ${XCAS_CONSOLE_SRCS})

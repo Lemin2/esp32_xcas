@@ -13,6 +13,7 @@ public:
 
     bool init() override;
     void onFocus() override;
+    void releaseUi() override;
     void handleKeyboardState(uint64_t pressedMask) override;
     void render() override;
 

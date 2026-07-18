@@ -19,6 +19,7 @@ public:
     bool init() override;
     void onFocus() override;
     void onBlur() override;
+    void releaseUi() override;
     void handleKeyboardState(uint64_t pressedMask) override;
     void handleMappedKey(uint32_t key) override;
     void render() override;
@@ -121,6 +122,7 @@ private:
     int xToPlot(float x) const;
     int yToPlot(float y) const;
     float plotXAt(int sample) const;
+    float cursorYValue() const;
     float finiteFallbackY() const;
     float computeDerivative(int func_index, int sample) const;
     float niceStep(float range, int max_ticks) const;
@@ -130,6 +132,10 @@ private:
     void handleInputPageInput(uint64_t newly, uint64_t current_mask);
     void handlePlotPageInput(uint64_t newly, uint64_t current_mask);
     void handleTablePageInput(uint64_t newly, uint64_t current_mask);
+    void handleEntryMappedKey(uint32_t key);
+    void handleInputPageMappedKey(uint32_t key);
+    void handlePlotPageMappedKey(uint32_t key);
+    void handleTablePageMappedKey(uint32_t key);
     void openPageMenu();
 
     ServiceHub &services_;
@@ -184,19 +190,19 @@ private:
     lv_obj_t *table_page_ = nullptr;
     lv_obj_t *menu_overlay_ = nullptr;
     lv_obj_t *menu_list_ = nullptr;
+    lv_obj_t *menu_page_ = nullptr;
     lv_obj_t *entry_overlay_ = nullptr;
 
     lv_obj_t *input_list_ = nullptr;
     lv_obj_t *input_rows_[kMaxFuncs] = {};
     lv_obj_t *plot_area_ = nullptr;
     lv_obj_t *table_obj_ = nullptr;
-    lv_obj_t *table_status_ = nullptr;
-    lv_obj_t *plot_title_ = nullptr;
-    lv_obj_t *table_title_ = nullptr;
 
     lv_obj_t *axis_x_ = nullptr;
     lv_obj_t *axis_y_ = nullptr;
     lv_obj_t *cursor_line_ = nullptr;
+    lv_obj_t *cursor_h_line_ = nullptr;
+    lv_obj_t *cursor_info_label_ = nullptr;
     lv_obj_t *x_tick_lines_[kMaxTicks] = {};
     lv_obj_t *y_tick_lines_[kMaxTicks] = {};
     lv_obj_t *x_tick_labels_[kMaxTicks] = {};
@@ -204,8 +210,10 @@ private:
     std::array<lv_point_precise_t, 2> axis_x_pts_{};
     std::array<lv_point_precise_t, 2> axis_y_pts_{};
     std::array<lv_point_precise_t, 2> cursor_pts_{};
+    std::array<lv_point_precise_t, 2> cursor_h_pts_{};
     std::array<lv_point_precise_t, 2> tick_pts_x_[kMaxTicks]{};
     std::array<lv_point_precise_t, 2> tick_pts_y_[kMaxTicks]{};
+    std::array<char, 80> cursor_info_buf_{};
 
     lv_obj_t *entry_title_ = nullptr;
     lv_obj_t *entry_box_ = nullptr;

@@ -21,6 +21,11 @@ void CalcApp::onBlur()
     ui_.hide();
 }
 
+void CalcApp::releaseUi()
+{
+    ui_.releaseUi();
+}
+
 void CalcApp::handleKeyboardState(uint64_t pressedMask)
 {
     ui_.handleKeyboardState(pressedMask);

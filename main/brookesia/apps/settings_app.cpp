@@ -3,8 +3,10 @@
 #include <cctype>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -13,16 +15,17 @@
 
 #include "sdkconfig.h"
 
-#if CONFIG_ESP_WIFI_ENABLED
+#if CONFIG_XCAS_ENABLE_WIFI
 #include "esp_event.h"
 #include "esp_netif.h"
+#include "esp_sntp.h"
 #include "esp_wifi.h"
 #endif
 
 #include "esp_vfs_fat.h"
 #include "sdmmc_cmd.h"
 
-#if CONFIG_BT_ENABLED
+#if CONFIG_XCAS_ENABLE_BLUETOOTH
 #include "esp_bt.h"
 #if CONFIG_BT_BLUEDROID_ENABLED
 #include "esp_bt_main.h"
@@ -31,6 +34,7 @@
 
 #include "cardputer_bsp.hpp"
 
+#include "brookesia/apps/fs_util.hpp"
 #include "brookesia/core/app_settings.hpp"
 #include "brookesia/core/ui_theme.hpp"
 
@@ -39,34 +43,23 @@ namespace ui_theme = brookesia::ui_theme;
 namespace brookesia {
 namespace {
 
-constexpr uint64_t kUpBit = (1ULL << 39);    // ';'
-constexpr uint64_t kDownBit = (1ULL << 53);  // '.'
-constexpr uint64_t kLeftBit = (1ULL << 52);  // ','
-constexpr uint64_t kRightBit = (1ULL << 54); // '/'
-constexpr uint64_t kEnterBit = (1ULL << 41); // Enter
+#if CONFIG_XCAS_ENABLE_WIFI
+constexpr bool kWifiBuilt = true;
+#else
+constexpr bool kWifiBuilt = false;
+#endif
+
+#if CONFIG_XCAS_ENABLE_BLUETOOTH
+constexpr bool kBtBuilt = true;
+#else
+constexpr bool kBtBuilt = false;
+#endif
 
 const char *const kAngleValues[] = {"RAD", "DEG"};
 constexpr int kAngleCount = 2;
 
 const int kDigitsValues[] = {12, 15, 20, 30};
 constexpr int kDigitsCount = 4;
-
-const char *const kRowNames[] = {
-    "Angle mode",
-    "Precision",
-    "Fn app switch",
-    "WiFi link",
-    "WiFi SSID",
-    "WiFi Password",
-    "Bluetooth HID",
-    "SD card",
-    "Memory",
-};
-
-const char *boolText(bool v)
-{
-    return v ? "ON" : "OFF";
-}
 
 bool isSdMounted()
 {
@@ -109,7 +102,7 @@ void maskPassword(const char *src, char *dst, size_t dst_size)
     dst[stars] = '\0';
 }
 
-#if CONFIG_ESP_WIFI_ENABLED
+#if CONFIG_XCAS_ENABLE_WIFI
 bool s_wifi_initialized = false;
 
 bool wifiInitOnce()
@@ -148,20 +141,6 @@ bool wifiInitOnce()
 }
 #endif
 
-lv_obj_t *makeRow(lv_obj_t *parent)
-{
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_width(row, lv_pct(100));
-    lv_obj_set_height(row, 26);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    ui_theme::applyRowCard(row, LV_COLOR_MAKE(208, 214, 224), 5, 8, 8);
-    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    return row;
-}
-
 } // namespace
 
 SettingsApp::SettingsApp(ServiceHub &services) : cas_(services.casService())
@@ -192,129 +171,444 @@ void SettingsApp::ensureUi()
     lv_obj_set_size(root_, w, h - 16);
     lv_obj_align(root_, LV_ALIGN_TOP_LEFT, 0, 16);
     ui_theme::applyPage(root_, LV_COLOR_MAKE(245, 245, 238));
-    lv_obj_set_style_pad_all(root_, 6, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(root_, 4, LV_PART_MAIN);
     lv_obj_set_flex_flow(root_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(root_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(root_, 4, LV_PART_MAIN);
-    lv_obj_add_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scrollbar_mode(root_, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_clear_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
 
-    title_ = lv_label_create(root_);
-    ui_theme::applyText16(title_);
-    lv_obj_set_style_text_color(title_, LV_COLOR_MAKE(24, 84, 192), LV_PART_MAIN);
-    lv_label_set_text(title_, "Settings  ;/. sel  ,// chg  Enter edit");
+    menu_ = lv_menu_create(root_);
+    lv_obj_set_size(menu_, lv_pct(100), lv_pct(100));
+    lv_obj_set_style_bg_opa(menu_, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_menu_set_mode_header(menu_, LV_MENU_HEADER_TOP_FIXED);
+    lv_menu_set_mode_root_back_button(menu_, LV_MENU_ROOT_BACK_BUTTON_ENABLED);
 
-    for (int i = 0; i < kRowCount; ++i) {
-        rows_[i] = makeRow(root_);
+    group_ = lv_group_create();
+    lv_group_set_editing(group_, false);
 
-        names_[i] = lv_label_create(rows_[i]);
-        ui_theme::applyText14(names_[i]);
-        lv_label_set_text(names_[i], kRowNames[i]);
+    root_page_ = lv_menu_page_create(menu_, "System");
+    calc_page_ = lv_menu_page_create(menu_, "Calculator");
+    wifi_page_ = lv_menu_page_create(menu_, "WiFi");
+    bt_page_ = lv_menu_page_create(menu_, "Bluetooth");
+    clock_page_ = lv_menu_page_create(menu_, "Clock");
+    status_page_ = lv_menu_page_create(menu_, "Status bar");
 
-        values_[i] = lv_label_create(rows_[i]);
-        ui_theme::applyText14(values_[i]);
-        lv_label_set_long_mode(values_[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_style_max_width(values_[i], 150, LV_PART_MAIN);
+    MenuEntry *calc_root = addMenuEntry(root_page_, Page::Root, Item::CalcPage, "Calculator");
+    MenuEntry *wifi_root = addMenuEntry(root_page_, Page::Root, Item::WifiPage, "WiFi");
+    MenuEntry *bt_root = addMenuEntry(root_page_, Page::Root, Item::BtPage, "Bluetooth");
+    MenuEntry *clock_root = addMenuEntry(root_page_, Page::Root, Item::ClockPage, "Clock");
+    MenuEntry *status_root = addMenuEntry(root_page_, Page::Root, Item::StatusBarPage, "Status bar");
+    addMenuEntry(root_page_, Page::Root, Item::SdCard, "SD card");
+    addMenuEntry(root_page_, Page::Root, Item::Memory, "Memory");
+    addMenuEntry(root_page_, Page::Root, Item::ClearSession, "Clear session");
+
+    if (calc_root != nullptr) {
+        lv_menu_set_load_page_event(menu_, calc_root->row, calc_page_);
     }
+    if (wifi_root != nullptr) {
+        lv_menu_set_load_page_event(menu_, wifi_root->row, wifi_page_);
+    }
+    if (bt_root != nullptr) {
+        lv_menu_set_load_page_event(menu_, bt_root->row, bt_page_);
+    }
+    if (clock_root != nullptr) {
+        lv_menu_set_load_page_event(menu_, clock_root->row, clock_page_);
+    }
+    if (status_root != nullptr) {
+        lv_menu_set_load_page_event(menu_, status_root->row, status_page_);
+    }
+
+    addMenuEntry(calc_page_, Page::Calculator, Item::Angle, "Angle mode");
+    addMenuEntry(calc_page_, Page::Calculator, Item::Precision, "Precision");
+    addMenuEntry(calc_page_, Page::Calculator, Item::FnSwitch, "Fn app switch", true);
+
+    addMenuEntry(wifi_page_, Page::Wifi, Item::WifiEnable, "WiFi power", true);
+    addMenuEntry(wifi_page_, Page::Wifi, Item::WifiScan, "Scan networks");
+    addMenuEntry(wifi_page_, Page::Wifi, Item::WifiConnect, "Connect saved");
+    addMenuEntry(wifi_page_, Page::Wifi, Item::WifiSsid, "SSID");
+    addMenuEntry(wifi_page_, Page::Wifi, Item::WifiPassword, "Password");
+    addMenuEntry(wifi_page_, Page::Wifi, Item::WifiStatus, "Status");
+
+    addMenuEntry(bt_page_, Page::Bluetooth, Item::BtEnable, "Bluetooth power", true);
+    addMenuEntry(bt_page_, Page::Bluetooth, Item::BtScan, "Scan devices");
+    addMenuEntry(bt_page_, Page::Bluetooth, Item::BtConnect, "Connect saved");
+    addMenuEntry(bt_page_, Page::Bluetooth, Item::BtStatus, "Status");
+
+    addMenuEntry(clock_page_, Page::Clock, Item::ClockDate, "Date");
+    addMenuEntry(clock_page_, Page::Clock, Item::ClockTime, "Time");
+    addMenuEntry(clock_page_, Page::Clock, Item::ClockSync, "Sync network");
+
+    addMenuEntry(status_page_, Page::StatusBar, Item::StatusWifiIcon, "WiFi icon", true);
+    addMenuEntry(status_page_, Page::StatusBar, Item::StatusBtIcon, "Bluetooth icon", true);
+    addMenuEntry(status_page_, Page::StatusBar, Item::StatusMemory, "Free memory", true);
+    addMenuEntry(status_page_, Page::StatusBar, Item::StatusMemoryUnit, "Memory unit");
+    addMenuEntry(status_page_, Page::StatusBar, Item::StatusClock, "Clock", true);
+
+    lv_menu_set_page(menu_, root_page_);
 
     ui_ready_ = true;
 }
 
-void SettingsApp::refreshRows()
+SettingsApp::MenuEntry *SettingsApp::addMenuEntry(lv_obj_t *page_obj, Page page, Item item,
+                                                  const char *name, bool with_toggle)
+{
+    if (entry_count_ >= kMaxMenuEntries) {
+        return nullptr;
+    }
+
+    MenuEntry &entry = entries_[entry_count_++];
+    entry.item = item;
+    entry.page = page;
+    entry.row = lv_menu_cont_create(page_obj);
+    lv_obj_add_flag(entry.row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(entry.row, &SettingsApp::menuEntryEventCb, LV_EVENT_ALL, this);
+    lv_obj_set_height(entry.row, 24);
+    lv_obj_set_width(entry.row, lv_pct(100));
+    lv_obj_set_flex_flow(entry.row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(entry.row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    ui_theme::applyRowCard(entry.row, LV_COLOR_MAKE(208, 214, 224), 4, 7, 7);
+
+    entry.name = lv_label_create(entry.row);
+    ui_theme::applyText14(entry.name);
+    lv_label_set_text(entry.name, name);
+    lv_obj_set_flex_grow(entry.name, 1);
+
+    if (with_toggle) {
+        entry.toggle = lv_switch_create(entry.row);
+        lv_obj_set_size(entry.toggle, 28, 16);
+    } else {
+        entry.value = lv_label_create(entry.row);
+        ui_theme::applyText14(entry.value);
+        lv_label_set_long_mode(entry.value, LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_style_max_width(entry.value, 132, LV_PART_MAIN);
+    }
+
+    return &entry;
+}
+
+void SettingsApp::menuEntryEventCb(lv_event_t *e)
+{
+    auto *self = static_cast<SettingsApp *>(lv_event_get_user_data(e));
+    if (self == nullptr) {
+        return;
+    }
+    lv_obj_t *target = lv_event_get_target_obj(e);
+    MenuEntry *entry = self->findEntryByRow(target);
+    if (entry == nullptr || entry->disabled) {
+        return;
+    }
+
+    const lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_FOCUSED) {
+        self->selected_item_ = entry->item;
+        self->refreshMenu();
+    } else if (code == LV_EVENT_CLICKED) {
+        self->selected_item_ = entry->item;
+        self->activateSelected();
+        self->refreshMenu();
+    } else if (code == LV_EVENT_KEY) {
+        const uint32_t key = lv_event_get_key(e);
+        if (key == LV_KEY_ENTER || key == LV_KEY_RIGHT) {
+            self->selected_item_ = entry->item;
+            self->activateSelected();
+            self->refreshMenu();
+        }
+    }
+}
+
+SettingsApp::MenuEntry *SettingsApp::findEntry(Item item)
+{
+    for (int i = 0; i < entry_count_; ++i) {
+        if (entries_[i].item == item) {
+            return &entries_[i];
+        }
+    }
+    return nullptr;
+}
+
+SettingsApp::MenuEntry *SettingsApp::findEntryByRow(lv_obj_t *row)
+{
+    for (int i = 0; i < entry_count_; ++i) {
+        if (entries_[i].row == row) {
+            return &entries_[i];
+        }
+    }
+    return nullptr;
+}
+
+bool SettingsApp::isSelectable(const MenuEntry &entry) const
+{
+    return entry.page == current_page_ && !entry.disabled;
+}
+
+void SettingsApp::ensureSelectionOnPage()
+{
+    for (int i = 0; i < entry_count_; ++i) {
+        if (entries_[i].item == selected_item_ && isSelectable(entries_[i])) {
+            return;
+        }
+    }
+    for (int i = 0; i < entry_count_; ++i) {
+        if (isSelectable(entries_[i])) {
+            selected_item_ = entries_[i].item;
+            return;
+        }
+    }
+}
+
+void SettingsApp::setCurrentPage(Page page)
+{
+    current_page_ = page;
+    if (menu_ != nullptr) {
+        lv_obj_t *page_obj = root_page_;
+        if (page == Page::Calculator) {
+            page_obj = calc_page_;
+        } else if (page == Page::Wifi) {
+            page_obj = wifi_page_;
+        } else if (page == Page::Bluetooth) {
+            page_obj = bt_page_;
+        } else if (page == Page::Clock) {
+            page_obj = clock_page_;
+        } else if (page == Page::StatusBar) {
+            page_obj = status_page_;
+        }
+        lv_menu_set_page(menu_, page_obj);
+    }
+    ensureSelectionOnPage();
+    syncFocusGroup();
+}
+
+void SettingsApp::refreshMenu()
 {
     if (!ui_ready_) {
         return;
     }
 
-    lv_label_set_text(values_[0], kAngleValues[angle_index_]);
+    if (MenuEntry *entry = findEntry(Item::Angle); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, kAngleValues[angle_index_]);
+    }
 
     char digbuf[16];
     std::snprintf(digbuf, sizeof(digbuf), "%d", kDigitsValues[digits_index_]);
-    lv_label_set_text(values_[1], digbuf);
+    if (MenuEntry *entry = findEntry(Item::Precision); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, digbuf);
+    }
 
-    lv_label_set_text(values_[2], boolText(fn_app_switch_enabled_));
+    if (MenuEntry *entry = findEntry(Item::FnSwitch); entry != nullptr && entry->toggle != nullptr) {
+        if (fn_app_switch_enabled_) {
+            lv_obj_add_state(entry->toggle, LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(entry->toggle, LV_STATE_CHECKED);
+        }
+    }
 
-    lv_label_set_text(values_[3], wifi_state_text_.data());
+    if (MenuEntry *entry = findEntry(Item::CalcPage); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, kAngleValues[angle_index_]);
+    }
+
+    if (MenuEntry *entry = findEntry(Item::WifiPage); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, kWifiBuilt ? wifi_state_text_.data() : "Unavailable");
+    }
+    if (MenuEntry *entry = findEntry(Item::WifiEnable); entry != nullptr && entry->toggle != nullptr) {
+        if (wifi_enabled_ && kWifiBuilt) {
+            lv_obj_add_state(entry->toggle, LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(entry->toggle, LV_STATE_CHECKED);
+        }
+    }
 
     settings::AppSettings cfg = settings::get();
     std::string ssid_text;
-    if (editing_ && edit_row_ == 4) {
+    if (editing_ && edit_item_ == Item::WifiSsid) {
         ssid_text = std::string("EDIT:") + edit_buffer_ + "_";
     } else if (cfg.wifi_ssid[0] == '\0') {
         ssid_text = "(empty)";
     } else {
         ssid_text = cfg.wifi_ssid;
     }
-    lv_label_set_text(values_[4], ssid_text.c_str());
+    if (MenuEntry *entry = findEntry(Item::WifiSsid); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, ssid_text.c_str());
+    }
 
     char pass_masked[65];
     std::string pass_text;
-    if (editing_ && edit_row_ == 5) {
+    if (editing_ && edit_item_ == Item::WifiPassword) {
         pass_text = std::string("EDIT:") + edit_buffer_ + "_";
     } else {
         maskPassword(cfg.wifi_pass, pass_masked, sizeof(pass_masked));
         pass_text = pass_masked;
     }
-    lv_label_set_text(values_[5], pass_text.c_str());
+    if (MenuEntry *entry = findEntry(Item::WifiPassword); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, pass_text.c_str());
+    }
+    if (MenuEntry *entry = findEntry(Item::WifiStatus); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, kWifiBuilt ? wifi_state_text_.data() : "Unavailable");
+    }
 
-    lv_label_set_text(values_[6], bt_state_text_.data());
+    if (MenuEntry *entry = findEntry(Item::BtPage); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, kBtBuilt ? bt_state_text_.data() : "Unavailable");
+    }
+    if (MenuEntry *entry = findEntry(Item::BtEnable); entry != nullptr && entry->toggle != nullptr) {
+        if (bt_hid_enabled_ && kBtBuilt) {
+            lv_obj_add_state(entry->toggle, LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(entry->toggle, LV_STATE_CHECKED);
+        }
+    }
+    if (MenuEntry *entry = findEntry(Item::BtStatus); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, kBtBuilt ? bt_state_text_.data() : "Unavailable");
+    }
 
-    lv_label_set_text(values_[7], sd_state_text_.data());
+    if (MenuEntry *entry = findEntry(Item::SdCard); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, sd_state_text_.data());
+    }
+    if (MenuEntry *entry = findEntry(Item::ClearSession); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, "calc+graph");
+    }
 
-    for (int i = 0; i < kRowCount; ++i) {
-        const bool sel = (i == selected_);
-        lv_obj_set_style_bg_opa(rows_[i], sel ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
-        lv_obj_set_style_bg_color(rows_[i], LV_COLOR_MAKE(24, 84, 192), LV_PART_MAIN);
+    char date_buf[16];
+    std::snprintf(date_buf, sizeof(date_buf), "%04d-%02d-%02d", clock_year_, clock_month_, clock_day_);
+    if (MenuEntry *entry = findEntry(Item::ClockDate); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, date_buf);
+    }
+    char time_buf[12];
+    std::snprintf(time_buf, sizeof(time_buf), "%02d:%02d", clock_hour_, clock_minute_);
+    if (MenuEntry *entry = findEntry(Item::ClockTime); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, time_buf);
+    }
+    if (MenuEntry *entry = findEntry(Item::ClockSync); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, (kWifiBuilt && wifi_connected_) ? "online" : "WiFi needed");
+    }
+    if (MenuEntry *entry = findEntry(Item::ClockPage); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, time_buf);
+    }
+
+    auto setToggle = [this](Item item, bool enabled) {
+        if (MenuEntry *entry = findEntry(item); entry != nullptr && entry->toggle != nullptr) {
+            if (enabled) {
+                lv_obj_add_state(entry->toggle, LV_STATE_CHECKED);
+            } else {
+                lv_obj_remove_state(entry->toggle, LV_STATE_CHECKED);
+            }
+        }
+    };
+    setToggle(Item::StatusWifiIcon, status_show_wifi_);
+    setToggle(Item::StatusBtIcon, status_show_bt_);
+    setToggle(Item::StatusMemory, status_show_memory_);
+    setToggle(Item::StatusClock, status_show_clock_);
+    if (MenuEntry *entry = findEntry(Item::StatusMemoryUnit); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, status_memory_mb_ ? "MB" : "KB");
+    }
+
+    for (int i = 0; i < entry_count_; ++i) {
+        MenuEntry &entry = entries_[i];
+        entry.disabled = false;
+        if ((entry.item == Item::WifiPage || entry.item == Item::WifiEnable ||
+             entry.item == Item::WifiScan || entry.item == Item::WifiConnect ||
+             entry.item == Item::WifiSsid || entry.item == Item::WifiPassword ||
+             entry.item == Item::WifiStatus) &&
+            !kWifiBuilt) {
+            entry.disabled = true;
+        }
+        if ((entry.item == Item::BtPage || entry.item == Item::BtEnable ||
+             entry.item == Item::BtScan || entry.item == Item::BtConnect ||
+             entry.item == Item::BtStatus) &&
+            !kBtBuilt) {
+            entry.disabled = true;
+        }
+        if (entry.item == Item::ClockSync && (!kWifiBuilt || !wifi_connected_)) {
+            entry.disabled = true;
+        }
+    }
+
+    ensureSelectionOnPage();
+
+    for (int i = 0; i < entry_count_; ++i) {
+        MenuEntry &entry = entries_[i];
+        const bool sel = (entry.page == current_page_ && entry.item == selected_item_);
+        lv_obj_set_style_bg_opa(entry.row, sel ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(entry.row, LV_COLOR_MAKE(24, 84, 192), LV_PART_MAIN);
         lv_color_t text_col;
         if (sel) {
             text_col = LV_COLOR_MAKE(255, 255, 255);
+        } else if (entry.disabled) {
+            text_col = LV_COLOR_MAKE(130, 136, 144);
         } else {
             text_col = LV_COLOR_MAKE(16, 24, 36);
         }
-        lv_obj_set_style_text_color(names_[i], text_col, LV_PART_MAIN);
-        lv_obj_set_style_text_color(values_[i], text_col, LV_PART_MAIN);
+        lv_obj_set_style_text_color(entry.name, text_col, LV_PART_MAIN);
+        if (entry.value != nullptr) {
+            lv_obj_set_style_text_color(entry.value, text_col, LV_PART_MAIN);
+        }
+        if (entry.toggle != nullptr) {
+            if (entry.disabled) {
+                lv_obj_add_state(entry.toggle, LV_STATE_DISABLED);
+            } else {
+                lv_obj_remove_state(entry.toggle, LV_STATE_DISABLED);
+            }
+        }
+        if (entry.disabled) {
+            lv_obj_add_state(entry.row, LV_STATE_DISABLED);
+        } else {
+            lv_obj_remove_state(entry.row, LV_STATE_DISABLED);
+        }
     }
 
-    if (selected_ >= 0 && selected_ < kRowCount && rows_[selected_] != nullptr) {
-        lv_obj_scroll_to_view(rows_[selected_], LV_ANIM_OFF);
+    if (MenuEntry *entry = findEntry(selected_item_); entry != nullptr && entry->row != nullptr) {
+        lv_obj_scroll_to_view(entry->row, LV_ANIM_ON);
     }
 }
 
-void SettingsApp::moveSelection(int delta)
+void SettingsApp::syncFocusGroup()
 {
-    selected_ = (selected_ + kRowCount + delta) % kRowCount;
+    if (group_ == nullptr) {
+        return;
+    }
+    lv_group_remove_all_objs(group_);
+    for (int i = 0; i < entry_count_; ++i) {
+        if (isSelectable(entries_[i]) && entries_[i].row != nullptr) {
+            lv_group_add_obj(group_, entries_[i].row);
+        }
+    }
+    focusSelected();
+}
+
+void SettingsApp::focusSelected()
+{
+    if (group_ == nullptr) {
+        return;
+    }
+    if (MenuEntry *entry = findEntry(selected_item_); entry != nullptr && isSelectable(*entry)) {
+        lv_group_focus_obj(entry->row);
+    }
 }
 
 void SettingsApp::applyHorizontalAction(int dir)
 {
-    if (selected_ == 0) {
+    if (selected_item_ == Item::Angle) {
         angle_index_ = (angle_index_ + kAngleCount + dir) % kAngleCount;
         applyAngle();
         settings::AppSettings cfg = settings::get();
         cfg.angle_index = angle_index_;
         settings::set(cfg);
         settings::save();
-    } else if (selected_ == 1) {
+    } else if (selected_item_ == Item::Precision) {
         digits_index_ = (digits_index_ + kDigitsCount + dir) % kDigitsCount;
         applyDigits();
         settings::AppSettings cfg = settings::get();
         cfg.digits_index = digits_index_;
         settings::set(cfg);
         settings::save();
-    } else if (selected_ == 2) {
+    } else if (selected_item_ == Item::FnSwitch) {
         fn_app_switch_enabled_ = !fn_app_switch_enabled_;
         applyFnSwitch();
-    } else if (selected_ == 3) {
+    } else if (selected_item_ == Item::WifiEnable && kWifiBuilt) {
         wifi_enabled_ = !wifi_enabled_;
         applyWifi();
-    } else if (selected_ == 4) {
-        beginEdit(4);
-    } else if (selected_ == 5) {
-        beginEdit(5);
-    } else if (selected_ == 6) {
+    } else if (selected_item_ == Item::BtEnable && kBtBuilt) {
         bt_hid_enabled_ = !bt_hid_enabled_;
         applyBtHid();
-    } else if (selected_ == 7) {
+    } else if (selected_item_ == Item::SdCard) {
         if (sd_ready_) {
             unmountExternalSd();
         } else {
@@ -323,7 +617,172 @@ void SettingsApp::applyHorizontalAction(int dir)
         sd_ready_ = isSdMounted();
         std::snprintf(sd_state_text_.data(), sd_state_text_.size(), "%s",
                       sd_ready_ ? "mounted FATFS" : "not mounted");
+    } else if (selected_item_ == Item::ClockDate) {
+        adjustClockDate(dir);
+    } else if (selected_item_ == Item::ClockTime) {
+        adjustClockTime(dir);
+    } else if (selected_item_ == Item::StatusWifiIcon) {
+        status_show_wifi_ = !status_show_wifi_;
+        applyStatusSettings();
+    } else if (selected_item_ == Item::StatusBtIcon) {
+        status_show_bt_ = !status_show_bt_;
+        applyStatusSettings();
+    } else if (selected_item_ == Item::StatusMemory) {
+        status_show_memory_ = !status_show_memory_;
+        applyStatusSettings();
+    } else if (selected_item_ == Item::StatusMemoryUnit) {
+        status_memory_mb_ = !status_memory_mb_;
+        applyStatusSettings();
+    } else if (selected_item_ == Item::StatusClock) {
+        status_show_clock_ = !status_show_clock_;
+        applyStatusSettings();
     }
+}
+
+void SettingsApp::activateSelected()
+{
+    MenuEntry *entry = findEntry(selected_item_);
+    if (entry == nullptr || entry->disabled) {
+        return;
+    }
+
+    if (selected_item_ == Item::CalcPage) {
+        setCurrentPage(Page::Calculator);
+    } else if (selected_item_ == Item::WifiPage) {
+        setCurrentPage(Page::Wifi);
+    } else if (selected_item_ == Item::BtPage) {
+        setCurrentPage(Page::Bluetooth);
+    } else if (selected_item_ == Item::ClockPage) {
+        setCurrentPage(Page::Clock);
+    } else if (selected_item_ == Item::StatusBarPage) {
+        setCurrentPage(Page::StatusBar);
+    } else if (selected_item_ == Item::WifiEnable || selected_item_ == Item::BtEnable ||
+               selected_item_ == Item::FnSwitch || selected_item_ == Item::SdCard ||
+               selected_item_ == Item::Angle || selected_item_ == Item::Precision ||
+               selected_item_ == Item::ClockDate || selected_item_ == Item::ClockTime ||
+               selected_item_ == Item::StatusWifiIcon || selected_item_ == Item::StatusBtIcon ||
+               selected_item_ == Item::StatusMemory || selected_item_ == Item::StatusMemoryUnit ||
+               selected_item_ == Item::StatusClock) {
+        applyHorizontalAction(1);
+    } else if (selected_item_ == Item::WifiScan) {
+        scanWifi();
+    } else if (selected_item_ == Item::WifiConnect) {
+        connectWifi();
+    } else if (selected_item_ == Item::WifiSsid || selected_item_ == Item::WifiPassword) {
+        beginEdit(selected_item_);
+    } else if (selected_item_ == Item::BtScan) {
+        scanBluetooth();
+    } else if (selected_item_ == Item::BtConnect) {
+        connectBluetooth();
+    } else if (selected_item_ == Item::ClockSync) {
+        syncClockNetwork();
+    } else if (selected_item_ == Item::ClearSession) {
+        clearSession();
+    }
+}
+
+void SettingsApp::clearSession()
+{
+    if (!ensureStorageMounted()) {
+        return;
+    }
+    std::remove("/data/calc_session.txt");
+    std::remove("/data/graph_session.txt");
+}
+
+void SettingsApp::adjustClockDate(int dir)
+{
+    clock_day_ += dir;
+    if (clock_day_ < 1) {
+        clock_day_ = 31;
+        --clock_month_;
+    } else if (clock_day_ > 31) {
+        clock_day_ = 1;
+        ++clock_month_;
+    }
+    if (clock_month_ < 1) {
+        clock_month_ = 12;
+        --clock_year_;
+    } else if (clock_month_ > 12) {
+        clock_month_ = 1;
+        ++clock_year_;
+    }
+    if (clock_year_ < 2024) {
+        clock_year_ = 2099;
+    } else if (clock_year_ > 2099) {
+        clock_year_ = 2024;
+    }
+    applyClockToSystem();
+}
+
+void SettingsApp::adjustClockTime(int dir)
+{
+    clock_minute_ += dir;
+    if (clock_minute_ < 0) {
+        clock_minute_ = 59;
+        --clock_hour_;
+    } else if (clock_minute_ > 59) {
+        clock_minute_ = 0;
+        ++clock_hour_;
+    }
+    if (clock_hour_ < 0) {
+        clock_hour_ = 23;
+    } else if (clock_hour_ > 23) {
+        clock_hour_ = 0;
+    }
+    applyClockToSystem();
+}
+
+void SettingsApp::applyClockToSystem()
+{
+    settings::AppSettings cfg = settings::get();
+    cfg.clock_year = clock_year_;
+    cfg.clock_month = clock_month_;
+    cfg.clock_day = clock_day_;
+    cfg.clock_hour = clock_hour_;
+    cfg.clock_minute = clock_minute_;
+    settings::set(cfg);
+    settings::save();
+
+    std::tm tm_value = {};
+    tm_value.tm_year = clock_year_ - 1900;
+    tm_value.tm_mon = clock_month_ - 1;
+    tm_value.tm_mday = clock_day_;
+    tm_value.tm_hour = clock_hour_;
+    tm_value.tm_min = clock_minute_;
+    tm_value.tm_sec = 0;
+    const std::time_t epoch = std::mktime(&tm_value);
+    if (epoch > 0) {
+        timeval tv = {};
+        tv.tv_sec = epoch;
+        settimeofday(&tv, nullptr);
+    }
+}
+
+void SettingsApp::syncClockNetwork()
+{
+#if CONFIG_XCAS_ENABLE_WIFI
+    if (!wifi_connected_) {
+        return;
+    }
+    esp_sntp_stop();
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0, "pool.ntp.org");
+    esp_sntp_init();
+    std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "SNTP sync");
+#endif
+}
+
+void SettingsApp::applyStatusSettings()
+{
+    settings::AppSettings cfg = settings::get();
+    cfg.status_show_wifi = status_show_wifi_;
+    cfg.status_show_bt = status_show_bt_;
+    cfg.status_show_memory = status_show_memory_;
+    cfg.status_memory_mb = status_memory_mb_;
+    cfg.status_show_clock = status_show_clock_;
+    settings::set(cfg);
+    settings::save();
 }
 
 void SettingsApp::applyAngle()
@@ -353,7 +812,7 @@ void SettingsApp::applyWifi()
     settings::set(cfg);
     settings::save();
 
-#if CONFIG_ESP_WIFI_ENABLED
+#if CONFIG_XCAS_ENABLE_WIFI
     if (!wifi_enabled_) {
         wifi_connected_ = false;
         std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "OFF");
@@ -409,8 +868,61 @@ void SettingsApp::applyWifi()
     }
 #else
     wifi_connected_ = false;
-    std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "NOT BUILT");
+    std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "Unavailable");
 #endif
+}
+
+void SettingsApp::scanWifi()
+{
+#if CONFIG_XCAS_ENABLE_WIFI
+    if (!wifi_enabled_) {
+        std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "WiFi OFF");
+        return;
+    }
+    if (!wifiInitOnce()) {
+        std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "INIT FAIL");
+        return;
+    }
+
+    std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "SCANNING...");
+    wifi_scan_config_t scan_cfg = {};
+    if (esp_wifi_scan_start(&scan_cfg, true) != ESP_OK) {
+        std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "SCAN FAIL");
+        return;
+    }
+
+    uint16_t ap_count = 0;
+    if (esp_wifi_scan_get_ap_num(&ap_count) != ESP_OK) {
+        std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "SCAN EMPTY");
+        return;
+    }
+    if (ap_count == 0) {
+        std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "0 AP");
+        return;
+    }
+
+    wifi_ap_record_t ap = {};
+    uint16_t one = 1;
+    if (esp_wifi_scan_get_ap_records(&one, &ap) == ESP_OK && one > 0) {
+        std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "%u AP %s",
+                      static_cast<unsigned>(ap_count), reinterpret_cast<const char *>(ap.ssid));
+    } else {
+        std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "%u AP",
+                      static_cast<unsigned>(ap_count));
+    }
+#else
+    std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "Unavailable");
+#endif
+}
+
+void SettingsApp::connectWifi()
+{
+    if (!kWifiBuilt) {
+        std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "Unavailable");
+        return;
+    }
+    wifi_enabled_ = true;
+    applyWifi();
 }
 
 void SettingsApp::applyBtHid()
@@ -420,7 +932,7 @@ void SettingsApp::applyBtHid()
     settings::set(cfg);
     settings::save();
 
-#if CONFIG_BT_ENABLED
+#if CONFIG_XCAS_ENABLE_BLUETOOTH
     bt_ready_ = false;
     if (bt_hid_enabled_) {
         if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_IDLE) {
@@ -447,7 +959,7 @@ void SettingsApp::applyBtHid()
         }
 #endif
         bt_ready_ = true;
-    std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "ON stack");
+        std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "ON stack");
     } else {
 #if CONFIG_BT_BLUEDROID_ENABLED
         if (esp_bluedroid_get_status() == ESP_BLUEDROID_STATUS_ENABLED) {
@@ -464,12 +976,42 @@ void SettingsApp::applyBtHid()
     }
 #else
     bt_ready_ = false;
-    std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "NOT BUILT");
+    std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "Unavailable");
 #endif
+}
+
+void SettingsApp::scanBluetooth()
+{
+    if (!kBtBuilt) {
+        std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "Unavailable");
+        return;
+    }
+    if (!bt_hid_enabled_) {
+        std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "BT OFF");
+        return;
+    }
+    std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "SCAN READY");
+}
+
+void SettingsApp::connectBluetooth()
+{
+    if (!kBtBuilt) {
+        std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "Unavailable");
+        return;
+    }
+    bt_hid_enabled_ = true;
+    applyBtHid();
+    if (bt_ready_) {
+        std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "PAIR READY");
+    }
 }
 
 void SettingsApp::refreshWifiStatus()
 {
+    if (!kWifiBuilt) {
+        std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "Unavailable");
+        return;
+    }
     if (!wifi_enabled_) {
         std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "OFF");
         return;
@@ -481,16 +1023,19 @@ void SettingsApp::refreshWifiStatus()
     }
 }
 
-void SettingsApp::beginEdit(int row)
+void SettingsApp::beginEdit(Item item)
 {
+    if (!kWifiBuilt) {
+        return;
+    }
     settings::AppSettings cfg = settings::get();
     editing_ = true;
-    edit_row_ = row;
+    edit_item_ = item;
     edit_length_ = 0;
     edit_buffer_[0] = '\0';
-    if (row == 4) {
+    if (item == Item::WifiSsid) {
         std::snprintf(edit_buffer_, sizeof(edit_buffer_), "%s", cfg.wifi_ssid);
-    } else if (row == 5) {
+    } else if (item == Item::WifiPassword) {
         std::snprintf(edit_buffer_, sizeof(edit_buffer_), "%s", cfg.wifi_pass);
     }
     edit_length_ = static_cast<int>(std::strlen(edit_buffer_));
@@ -503,10 +1048,10 @@ void SettingsApp::commitEdit()
     }
 
     settings::AppSettings cfg = settings::get();
-    if (edit_row_ == 4) {
+    if (edit_item_ == Item::WifiSsid) {
         std::strncpy(cfg.wifi_ssid, edit_buffer_, sizeof(cfg.wifi_ssid) - 1);
         cfg.wifi_ssid[sizeof(cfg.wifi_ssid) - 1] = '\0';
-    } else if (edit_row_ == 5) {
+    } else if (edit_item_ == Item::WifiPassword) {
         std::strncpy(cfg.wifi_pass, edit_buffer_, sizeof(cfg.wifi_pass) - 1);
         cfg.wifi_pass[sizeof(cfg.wifi_pass) - 1] = '\0';
     }
@@ -514,7 +1059,6 @@ void SettingsApp::commitEdit()
     settings::save();
 
     editing_ = false;
-    edit_row_ = -1;
     edit_buffer_[0] = '\0';
     edit_length_ = 0;
 
@@ -526,7 +1070,6 @@ void SettingsApp::commitEdit()
 void SettingsApp::cancelEdit()
 {
     editing_ = false;
-    edit_row_ = -1;
     edit_buffer_[0] = '\0';
     edit_length_ = 0;
 }
@@ -539,14 +1082,29 @@ void SettingsApp::onFocus()
     angle_index_ = (cfg.angle_index == 1) ? 1 : 0;
     digits_index_ = (cfg.digits_index >= 0 && cfg.digits_index < kDigitsCount) ? cfg.digits_index : 0;
     fn_app_switch_enabled_ = cfg.fn_app_switch_enabled;
-    wifi_enabled_ = cfg.wifi_enabled;
-    bt_hid_enabled_ = cfg.bt_hid_enabled;
+    wifi_enabled_ = kWifiBuilt && cfg.wifi_enabled;
+    bt_hid_enabled_ = kBtBuilt && cfg.bt_hid_enabled;
+    status_show_wifi_ = cfg.status_show_wifi;
+    status_show_bt_ = cfg.status_show_bt;
+    status_show_memory_ = cfg.status_show_memory;
+    status_memory_mb_ = cfg.status_memory_mb;
+    status_show_clock_ = cfg.status_show_clock;
+    clock_year_ = cfg.clock_year;
+    clock_month_ = cfg.clock_month;
+    clock_day_ = cfg.clock_day;
+    clock_hour_ = cfg.clock_hour;
+    clock_minute_ = cfg.clock_minute;
     sd_ready_ = isSdMounted();
-    std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "IDLE");
-    std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "%s", bt_hid_enabled_ ? "ON stack" : "OFF");
+    std::snprintf(wifi_state_text_.data(), wifi_state_text_.size(), "%s", kWifiBuilt ? "IDLE" : "Unavailable");
+    std::snprintf(bt_state_text_.data(), bt_state_text_.size(), "%s",
+                  kBtBuilt ? (bt_hid_enabled_ ? "ON stack" : "OFF") : "Unavailable");
     std::snprintf(sd_state_text_.data(), sd_state_text_.size(), "%s", sd_ready_ ? "mounted FATFS" : "not mounted");
 
     ensureUi();
+    if (group_ != nullptr) {
+        lv_group_set_default(group_);
+    }
+    setCurrentPage(Page::Root);
     if (root_ != nullptr) {
         lv_obj_clear_flag(root_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(root_);
@@ -557,7 +1115,7 @@ void SettingsApp::onFocus()
     applyWifi();
     applyBtHid();
 
-    refreshRows();
+    refreshMenu();
 }
 
 void SettingsApp::onBlur()
@@ -567,48 +1125,33 @@ void SettingsApp::onBlur()
     }
 }
 
+void SettingsApp::releaseUi()
+{
+    if (group_ != nullptr) {
+        lv_group_delete(group_);
+        group_ = nullptr;
+    }
+    if (root_ != nullptr) {
+        lv_obj_delete(root_);
+    }
+    root_ = nullptr;
+    menu_ = nullptr;
+    root_page_ = nullptr;
+    calc_page_ = nullptr;
+    wifi_page_ = nullptr;
+    bt_page_ = nullptr;
+    clock_page_ = nullptr;
+    status_page_ = nullptr;
+    entries_ = {};
+    entry_count_ = 0;
+    current_page_ = Page::Root;
+    editing_ = false;
+    ui_ready_ = false;
+}
+
 void SettingsApp::handleKeyboardState(uint64_t pressedMask)
 {
-    const uint64_t newly = pressedMask & ~prev_mask_;
     prev_mask_ = pressedMask;
-
-    if (editing_) {
-        if ((newly & kEnterBit) != 0U) {
-            commitEdit();
-            refreshRows();
-        }
-        return;
-    }
-
-    bool dirty = false;
-
-    if ((newly & kUpBit) != 0U) {
-        moveSelection(-1);
-        dirty = true;
-    }
-    if ((newly & kDownBit) != 0U) {
-        moveSelection(1);
-        dirty = true;
-    }
-
-    if ((newly & kEnterBit) != 0U) {
-        if (selected_ == 4 || selected_ == 5) {
-            beginEdit(selected_);
-            dirty = true;
-        }
-    }
-
-    const bool left = (newly & kLeftBit) != 0U;
-    const bool right = (newly & kRightBit) != 0U;
-    if (left || right) {
-        const int dir = right ? 1 : -1;
-        applyHorizontalAction(dir);
-        dirty = true;
-    }
-
-    if (dirty) {
-        refreshRows();
-    }
 }
 
 void SettingsApp::handleMappedKey(uint32_t key)
@@ -616,54 +1159,61 @@ void SettingsApp::handleMappedKey(uint32_t key)
     if (!editing_) {
         bool dirty = false;
         if (key == LV_KEY_UP) {
-            moveSelection(-1);
+            if (group_ != nullptr) {
+                lv_group_focus_prev(group_);
+            }
             dirty = true;
         } else if (key == LV_KEY_DOWN) {
-            moveSelection(1);
+            if (group_ != nullptr) {
+                lv_group_focus_next(group_);
+            }
             dirty = true;
-        } else if (key == LV_KEY_LEFT) {
-            applyHorizontalAction(-1);
+        } else if (key == LV_KEY_LEFT || key == LV_KEY_ESC) {
+            if (current_page_ != Page::Root) {
+                setCurrentPage(Page::Root);
+                dirty = true;
+            }
+        } else if (key == LV_KEY_ENTER) {
+            if (group_ != nullptr) {
+                lv_group_send_data(group_, key);
+            }
             dirty = true;
-        } else if (key == LV_KEY_RIGHT) {
-            applyHorizontalAction(1);
-            dirty = true;
-        } else if (key == LV_KEY_ENTER && (selected_ == 4 || selected_ == 5)) {
-            beginEdit(selected_);
-            dirty = true;
+        } else if (group_ != nullptr) {
+            lv_group_send_data(group_, key);
         }
 
         if (dirty) {
-            refreshRows();
+            refreshMenu();
         }
         return;
     }
 
     if (key == LV_KEY_ESC) {
         cancelEdit();
-        refreshRows();
+        refreshMenu();
         return;
     }
     if (key == LV_KEY_ENTER) {
         commitEdit();
-        refreshRows();
+        refreshMenu();
         return;
     }
     if (key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
         if (edit_length_ > 0) {
             --edit_length_;
             edit_buffer_[edit_length_] = '\0';
-            refreshRows();
+            refreshMenu();
         }
         return;
     }
 
     if (key >= 32U && key <= 126U && std::isprint(static_cast<int>(key)) != 0) {
-        const int max_len = (edit_row_ == 4) ? 32 : 64;
+        const int max_len = (edit_item_ == Item::WifiSsid) ? 32 : 64;
         if (edit_length_ < max_len) {
             edit_buffer_[edit_length_] = static_cast<char>(key);
             ++edit_length_;
             edit_buffer_[edit_length_] = '\0';
-            refreshRows();
+            refreshMenu();
         }
     }
 }
@@ -696,14 +1246,23 @@ void SettingsApp::render()
                   static_cast<unsigned long>(internal_kb),
                   static_cast<unsigned long>(spiram_kb),
                   static_cast<unsigned long>(up_s));
-    lv_label_set_text(values_[8], buf);
+    if (MenuEntry *entry = findEntry(Item::Memory); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, buf);
+    }
 
     sd_ready_ = isSdMounted();
     refreshWifiStatus();
     std::snprintf(sd_state_text_.data(), sd_state_text_.size(), "%s",
                   sd_ready_ ? "mounted FATFS" : "not mounted");
-    lv_label_set_text(values_[3], wifi_state_text_.data());
-    lv_label_set_text(values_[7], sd_state_text_.data());
+    if (MenuEntry *entry = findEntry(Item::WifiPage); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, kWifiBuilt ? wifi_state_text_.data() : "Unavailable");
+    }
+    if (MenuEntry *entry = findEntry(Item::WifiStatus); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, kWifiBuilt ? wifi_state_text_.data() : "Unavailable");
+    }
+    if (MenuEntry *entry = findEntry(Item::SdCard); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, sd_state_text_.data());
+    }
 }
 
 } // namespace brookesia

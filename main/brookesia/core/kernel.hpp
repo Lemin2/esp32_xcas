@@ -35,11 +35,12 @@ private:
     void ensureStatusBar();
     void updateStatusBar();
     void drawBootSplash();
-    void handleAppMenu(uint64_t newlyPressed);
     void ensureAppMenu();
     void showAppMenu(bool show);
     void updateAppMenu();
     void pumpLvgl();
+    int appMenuIndexForTile(lv_obj_t *tile) const;
+    static void appMenuTileEventCb(lv_event_t *e);
 
     static constexpr size_t kRouteCount = 5;
 
@@ -59,6 +60,7 @@ private:
     uint64_t previous_key_mask_ = 0;
     lv_obj_t *menu_overlay_ = nullptr;
     lv_obj_t *menu_items_[kRouteCount] = {};
+    lv_group_t *menu_group_ = nullptr;
     bool menu_ready_ = false;
     bool menu_open_ = false;
     int menu_index_ = 0;

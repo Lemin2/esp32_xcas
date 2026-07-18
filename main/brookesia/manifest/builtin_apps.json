@@ -23,8 +23,8 @@
       "enabled": false
     },
     {
-      "id": "sys.project",
-      "name": "Project",
+      "id": "cas.program",
+      "name": "Program",
       "entry": "TBD",
       "route": "Project",
       "enabled": false

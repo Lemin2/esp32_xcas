@@ -14,6 +14,7 @@ public:
     bool init() override;
     void onFocus() override;
     void onBlur() override;
+    void releaseUi() override;
     void handleKeyboardState(uint64_t pressedMask) override;
     void handleMappedKey(uint32_t key) override;
     void render() override;

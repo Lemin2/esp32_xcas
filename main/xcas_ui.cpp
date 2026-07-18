@@ -617,33 +617,38 @@ namespace xcas
 
     void XcasUi::initializeLvgl()
     {
-        if (lvgl_initialized_)
+        if (lvgl_initialized_ && root_ != nullptr)
         {
             return;
         }
 
-        lv_init();
+        if (lv_display_ == nullptr) {
+            lv_init();
 
-        lv_display_ = lv_display_create(board::CardputerBsp::kDisplayWidth, board::CardputerBsp::kDisplayHeight);
-        lv_display_set_color_format(lv_display_, LV_COLOR_FORMAT_RGB565);
-        lv_display_set_buffers(
-            lv_display_,
-            lv_draw_pixels_.data(),
-            nullptr,
-            static_cast<uint32_t>(lv_draw_pixels_.size() * sizeof(lv_draw_pixels_[0])),
-            LV_DISPLAY_RENDER_MODE_PARTIAL);
-        lv_display_set_flush_cb(lv_display_, &XcasUi::lvglFlush);
-        lv_display_set_user_data(lv_display_, this);
-        lv_display_set_default(lv_display_);
+            lv_display_ = lv_display_create(board::CardputerBsp::kDisplayWidth, board::CardputerBsp::kDisplayHeight);
+            lv_display_set_color_format(lv_display_, LV_COLOR_FORMAT_RGB565);
+            lv_display_set_buffers(
+                lv_display_,
+                lv_draw_pixels_.data(),
+                nullptr,
+                static_cast<uint32_t>(lv_draw_pixels_.size() * sizeof(lv_draw_pixels_[0])),
+                LV_DISPLAY_RENDER_MODE_PARTIAL);
+            lv_display_set_flush_cb(lv_display_, &XcasUi::lvglFlush);
+            lv_display_set_user_data(lv_display_, this);
+            lv_display_set_default(lv_display_);
 
-        keyboard_indev_ = lv_indev_create();
-        lv_indev_set_type(keyboard_indev_, LV_INDEV_TYPE_KEYPAD);
-        lv_indev_set_read_cb(keyboard_indev_, &XcasUi::lvglKeyboardRead);
-        lv_indev_set_user_data(keyboard_indev_, this);
+            keyboard_indev_ = lv_indev_create();
+            lv_indev_set_type(keyboard_indev_, LV_INDEV_TYPE_KEYPAD);
+            lv_indev_set_read_cb(keyboard_indev_, &XcasUi::lvglKeyboardRead);
+            lv_indev_set_user_data(keyboard_indev_, this);
 
-        input_group_ = lv_group_create();
+            input_group_ = lv_group_create();
             lv_group_set_default(input_group_);
-        lv_indev_set_group(keyboard_indev_, input_group_);
+            lv_indev_set_group(keyboard_indev_, input_group_);
+        } else if (input_group_ != nullptr) {
+            lv_group_remove_all_objs(input_group_);
+            lv_group_set_default(input_group_);
+        }
 
         buildLayout();
         lvgl_initialized_ = true;
@@ -768,11 +773,7 @@ namespace xcas
         lv_obj_set_scrollbar_mode(editor_preview_host_, LV_SCROLLBAR_MODE_AUTO);
         lv_obj_add_flag(editor_preview_host_, LV_OBJ_FLAG_HIDDEN);
 
-        editor_hint_label_ = lv_label_create(editor_preview_host_);
-        brookesia::ui_theme::applyText14(editor_hint_label_);
-        lv_obj_set_style_text_color(editor_hint_label_, LV_COLOR_MAKE(176, 188, 208), LV_PART_MAIN);
-        lv_obj_align(editor_hint_label_, LV_ALIGN_TOP_MID, 0, 2);
-        lv_label_set_text(editor_hint_label_, "Preview: Space/Esc exit, arrows pan");
+        editor_hint_label_ = nullptr;
 
         editor_preview_formula_ = lv_obj_create(editor_preview_host_);
         lv_obj_remove_style_all(editor_preview_formula_);
@@ -791,8 +792,9 @@ namespace xcas
         lv_style_init(&busy_style_);
         updateBusyBinding(false);
         root_ = root;
-        history_lines_.clear();
-        history_lines_.push_back("CAS ready. Enter to eval.");
+        if (history_lines_.empty()) {
+            // history_lines_.push_back("CAS ready. Enter to eval.");
+        }
         refreshHistoryList();
         setEditorFullscreen(false);
     }
@@ -2088,7 +2090,7 @@ namespace xcas
         refreshHistoryList();
         // Auto-scroll to bottom for new results (only if no manual selection active)
         if (selected_history_index_ < 0) {
-            lv_obj_scroll_to_y(history_panel_, LV_COORD_MAX, LV_ANIM_OFF);
+            lv_obj_scroll_to_y(history_panel_, LV_COORD_MAX, LV_ANIM_ON);
         }
     }
 
@@ -2336,7 +2338,7 @@ namespace xcas
            // selected entry instead of pixel-stepping the whole panel.
         lv_obj_t *row = lv_obj_get_child(history_list_, index);
         if (row != nullptr) {
-              lv_obj_scroll_to_view_recursive(row, LV_ANIM_OFF);
+              lv_obj_scroll_to_view_recursive(row, LV_ANIM_ON);
         }
 
         if (!applyToInput || input_box_ == nullptr) return;
@@ -2613,6 +2615,37 @@ namespace xcas
         }
     }
 
+    void XcasUi::releaseUi()
+    {
+        closeHistoryFullscreenPreview();
+        if (input_group_ != nullptr) {
+            lv_group_remove_all_objs(input_group_);
+        }
+        if (editor_preview_host_ != nullptr) {
+            lv_obj_delete(editor_preview_host_);
+        }
+        if (root_ != nullptr) {
+            lv_obj_delete(root_);
+        }
+        header_label_ = nullptr;
+        status_label_ = nullptr;
+        info_label_ = nullptr;
+        history_panel_ = nullptr;
+        history_list_ = nullptr;
+        editor_panel_ = nullptr;
+        editor_preview_host_ = nullptr;
+        editor_preview_formula_ = nullptr;
+        editor_preview_label_ = nullptr;
+        editor_hint_label_ = nullptr;
+        input_box_ = nullptr;
+        ac_hint_label_ = nullptr;
+        root_ = nullptr;
+        lv_style_reset(&busy_style_);
+        lvgl_initialized_ = false;
+        editor_fullscreen_ = false;
+        selected_history_index_ = -1;
+    }
+
     void XcasUi::loadSession()
     {
         if (!brookesia::ensureStorageMounted()) {
@@ -2648,7 +2681,7 @@ namespace xcas
         std::fclose(f);
 
         if (history_lines_.empty()) {
-            history_lines_.push_back("CAS ready. Enter to eval.");
+            // history_lines_.push_back("CAS ready. Enter to eval.");
         }
 
         selected_history_index_ = -1;

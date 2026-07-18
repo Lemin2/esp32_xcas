@@ -1,5 +1,19 @@
 menu "Example Configuration"
 
+    config XCAS_ENABLE_WIFI
+        bool "Enable WiFi support in GUI settings"
+        default n
+        help
+            Builds the ESP WiFi stack and enables WiFi controls in the Settings app.
+            Keep disabled on the default 8MB/no-PSRAM image to save flash and RAM.
+
+    config XCAS_ENABLE_BLUETOOTH
+        bool "Enable Bluetooth support in GUI settings"
+        default n
+        help
+            Builds the ESP Bluetooth stack and enables Bluetooth controls in the Settings app.
+            Keep disabled by default to save flash and RAM.
+
     config CONSOLE_STORE_HISTORY
         bool "Store command history in flash"
         default y

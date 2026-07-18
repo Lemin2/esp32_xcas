@@ -91,6 +91,22 @@ constexpr KeyLabel kKeyMap[4][14] = {
     {{0,0},{0,0},{0,0},{'z','Z'},{'x','X'},{'c','C'},{'v','V'},{'b','B'},{'n','N'},{'m','M'},{',','<'},{'.','>'},{'/','?'},{' ',' '}},
 };
 
+void styleLine(lv_obj_t *line, lv_color_t color, int width)
+{
+    if (line == nullptr) {
+        return;
+    }
+    lv_obj_set_style_line_width(line, width, LV_PART_MAIN);
+    lv_obj_set_style_line_color(line, color, LV_PART_MAIN);
+}
+
+lv_obj_t *createPlotLine(lv_obj_t *parent, lv_color_t color, int width)
+{
+    lv_obj_t *line = lv_line_create(parent);
+    styleLine(line, color, width);
+    return line;
+}
+
 } // namespace
 
 GraphApp::GraphApp(ServiceHub &services) : services_(services)
@@ -144,11 +160,6 @@ void GraphApp::ensureUi()
     lv_obj_set_style_pad_all(input_page_, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_row(input_page_, 3, LV_PART_MAIN);
 
-    lv_obj_t *input_title = lv_label_create(input_page_);
-    lv_label_set_text(input_title, "Functions");
-    ui_theme::applyText16(input_title);
-    lv_obj_set_style_text_color(input_title, LV_COLOR_MAKE(190, 205, 235), LV_PART_MAIN);
-
     input_list_ = lv_obj_create(input_page_);
     lv_obj_remove_style_all(input_list_);
     lv_obj_set_width(input_list_, kDisplayW - 8);
@@ -194,12 +205,6 @@ void GraphApp::ensureUi()
     lv_obj_clear_flag(plot_page_, LV_OBJ_FLAG_SCROLLABLE);
     ui_theme::applyPage(plot_page_, LV_COLOR_MAKE(8, 10, 18));
 
-    plot_title_ = lv_label_create(plot_page_);
-    lv_obj_set_pos(plot_title_, 3, 1);
-    ui_theme::applyText16(plot_title_);
-    lv_obj_set_style_text_color(plot_title_, LV_COLOR_MAKE(170, 190, 220), LV_PART_MAIN);
-    lv_label_set_text(plot_title_, "Plot");
-
     plot_area_ = lv_obj_create(plot_page_);
     lv_obj_remove_style_all(plot_area_);
     lv_obj_set_pos(plot_area_, 0, 0);
@@ -207,39 +212,43 @@ void GraphApp::ensureUi()
     ui_theme::applyPage(plot_area_, LV_COLOR_MAKE(8, 10, 18));
     lv_obj_clear_flag(plot_area_, LV_OBJ_FLAG_SCROLLABLE);
 
-    axis_x_ = lv_line_create(plot_area_);
-    axis_y_ = lv_line_create(plot_area_);
-    cursor_line_ = lv_line_create(plot_area_);
-    lv_obj_set_style_line_width(axis_x_, 1, LV_PART_MAIN);
-    lv_obj_set_style_line_width(axis_y_, 1, LV_PART_MAIN);
-    lv_obj_set_style_line_width(cursor_line_, 1, LV_PART_MAIN);
-    lv_obj_set_style_line_color(axis_x_, LV_COLOR_MAKE(70, 84, 110), LV_PART_MAIN);
-    lv_obj_set_style_line_color(axis_y_, LV_COLOR_MAKE(70, 84, 110), LV_PART_MAIN);
-    lv_obj_set_style_line_color(cursor_line_, LV_COLOR_MAKE(240, 220, 80), LV_PART_MAIN);
-    lv_obj_add_flag(cursor_line_, LV_OBJ_FLAG_HIDDEN);
+    axis_x_ = createPlotLine(plot_area_, LV_COLOR_MAKE(70, 84, 110), 1);
+    axis_y_ = createPlotLine(plot_area_, LV_COLOR_MAKE(70, 84, 110), 1);
+    cursor_line_ = createPlotLine(plot_area_, LV_COLOR_MAKE(240, 220, 80), 1);
+    cursor_h_line_ = createPlotLine(plot_area_, LV_COLOR_MAKE(240, 220, 80), 1);
+    if (cursor_line_) lv_obj_add_flag(cursor_line_, LV_OBJ_FLAG_HIDDEN);
+    if (cursor_h_line_) lv_obj_add_flag(cursor_h_line_, LV_OBJ_FLAG_HIDDEN);
+
+    cursor_info_label_ = lv_label_create(plot_area_);
+    if (cursor_info_label_) {
+        ui_theme::applyText14(cursor_info_label_);
+        lv_obj_set_style_text_color(cursor_info_label_, LV_COLOR_MAKE(245, 235, 160), LV_PART_MAIN);
+        lv_obj_set_style_bg_color(cursor_info_label_, LV_COLOR_MAKE(8, 10, 18), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(cursor_info_label_, LV_OPA_80, LV_PART_MAIN);
+        lv_obj_set_style_pad_hor(cursor_info_label_, 3, LV_PART_MAIN);
+        lv_obj_set_style_pad_ver(cursor_info_label_, 1, LV_PART_MAIN);
+        lv_obj_align(cursor_info_label_, LV_ALIGN_TOP_LEFT, 2, 2);
+        lv_obj_add_flag(cursor_info_label_, LV_OBJ_FLAG_HIDDEN);
+    }
 
     for (int i = 0; i < kMaxTicks; ++i) {
-        x_tick_lines_[i] = lv_line_create(plot_area_);
-        y_tick_lines_[i] = lv_line_create(plot_area_);
+        x_tick_lines_[i] = createPlotLine(plot_area_, LV_COLOR_MAKE(45, 60, 82), 1);
+        y_tick_lines_[i] = createPlotLine(plot_area_, LV_COLOR_MAKE(45, 60, 82), 1);
         x_tick_labels_[i] = lv_label_create(plot_area_);
         y_tick_labels_[i] = lv_label_create(plot_area_);
-        ui_theme::applyText14(x_tick_labels_[i]);
-        ui_theme::applyText14(y_tick_labels_[i]);
-        lv_obj_set_style_text_color(x_tick_labels_[i], LV_COLOR_MAKE(130, 145, 170), LV_PART_MAIN);
-        lv_obj_set_style_text_color(y_tick_labels_[i], LV_COLOR_MAKE(130, 145, 170), LV_PART_MAIN);
-        lv_obj_set_style_line_color(x_tick_lines_[i], LV_COLOR_MAKE(45, 60, 82), LV_PART_MAIN);
-        lv_obj_set_style_line_color(y_tick_lines_[i], LV_COLOR_MAKE(45, 60, 82), LV_PART_MAIN);
-        lv_obj_set_style_line_width(x_tick_lines_[i], 1, LV_PART_MAIN);
-        lv_obj_set_style_line_width(y_tick_lines_[i], 1, LV_PART_MAIN);
+        if (x_tick_labels_[i]) {
+            ui_theme::applyText14(x_tick_labels_[i]);
+            lv_obj_set_style_text_color(x_tick_labels_[i], LV_COLOR_MAKE(130, 145, 170), LV_PART_MAIN);
+        }
+        if (y_tick_labels_[i]) {
+            ui_theme::applyText14(y_tick_labels_[i]);
+            lv_obj_set_style_text_color(y_tick_labels_[i], LV_COLOR_MAKE(130, 145, 170), LV_PART_MAIN);
+        }
     }
 
     for (int fi = 0; fi < kMaxFuncs; ++fi) {
         for (int si = 0; si < kMaxPlotSegments; ++si) {
-            funcs_[fi].segments[si] = lv_line_create(plot_area_);
-            lv_obj_set_style_line_width(funcs_[fi].segments[si], 2, LV_PART_MAIN);
-            lv_obj_set_style_line_rounded(funcs_[fi].segments[si], true, LV_PART_MAIN);
-            lv_obj_set_style_line_color(funcs_[fi].segments[si], funcs_[fi].color, LV_PART_MAIN);
-            lv_obj_add_flag(funcs_[fi].segments[si], LV_OBJ_FLAG_HIDDEN);
+            funcs_[fi].segments[si] = nullptr;
         }
     }
 
@@ -251,16 +260,6 @@ void GraphApp::ensureUi()
     lv_obj_set_flex_flow(table_page_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(table_page_, 4, LV_PART_MAIN);
     lv_obj_set_style_pad_row(table_page_, 2, LV_PART_MAIN);
-
-    table_title_ = lv_label_create(table_page_);
-    lv_label_set_text(table_title_, "Table");
-    ui_theme::applyText16(table_title_);
-    lv_obj_set_style_text_color(table_title_, LV_COLOR_MAKE(190, 205, 235), LV_PART_MAIN);
-
-    table_status_ = lv_label_create(table_page_);
-    ui_theme::applyText14(table_status_);
-    lv_obj_set_style_text_color(table_status_, LV_COLOR_MAKE(140, 160, 190), LV_PART_MAIN);
-    lv_label_set_text(table_status_, "Range 0..10  Step 0.1");
 
     table_obj_ = lv_table_create(table_page_);
     lv_obj_set_width(table_obj_, kDisplayW - 8);
@@ -289,7 +288,7 @@ void GraphApp::buildMenuOverlay()
     lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
 
-    menu_list_ = lv_list_create(menu_overlay_);
+    menu_list_ = lv_menu_create(menu_overlay_);
     lv_obj_set_size(menu_list_, 216, 104);
     lv_obj_align(menu_list_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(menu_list_, LV_COLOR_MAKE(22, 28, 42), LV_PART_MAIN);
@@ -297,6 +296,10 @@ void GraphApp::buildMenuOverlay()
     lv_obj_set_style_border_width(menu_list_, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(menu_list_, 2, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(menu_list_, LV_SCROLLBAR_MODE_AUTO);
+    lv_menu_set_mode_header(menu_list_, LV_MENU_HEADER_TOP_FIXED);
+    lv_menu_set_mode_root_back_button(menu_list_, LV_MENU_ROOT_BACK_BUTTON_DISABLED);
+    menu_page_ = lv_menu_page_create(menu_list_, nullptr);
+    lv_menu_set_page(menu_list_, menu_page_);
     menu_items_.clear();
     menu_rows_.clear();
 }
@@ -325,6 +328,9 @@ void GraphApp::buildEntryOverlay()
     lv_obj_set_style_bg_opa(entry_box_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(entry_box_, 0, LV_PART_MAIN);
     lv_obj_set_style_pad_all(entry_box_, 2, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(entry_box_, LV_COLOR_MAKE(240, 220, 80), LV_PART_CURSOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(entry_box_, LV_OPA_COVER, LV_PART_CURSOR | LV_STATE_DEFAULT);
+    lv_obj_add_state(entry_box_, LV_STATE_FOCUSED);
 }
 
 void GraphApp::refreshPageVisibility()
@@ -390,6 +396,56 @@ void GraphApp::onBlur()
     if (root_) {
         lv_obj_add_flag(root_, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+void GraphApp::releaseUi()
+{
+    if (menu_group_ != nullptr) {
+        lv_group_delete(menu_group_);
+        menu_group_ = nullptr;
+    }
+    if (root_ != nullptr) {
+        lv_obj_delete(root_);
+    }
+
+    root_ = nullptr;
+    input_page_ = nullptr;
+    plot_page_ = nullptr;
+    table_page_ = nullptr;
+    menu_overlay_ = nullptr;
+    menu_list_ = nullptr;
+    menu_page_ = nullptr;
+    entry_overlay_ = nullptr;
+    input_list_ = nullptr;
+    plot_area_ = nullptr;
+    table_obj_ = nullptr;
+    axis_x_ = nullptr;
+    axis_y_ = nullptr;
+    cursor_line_ = nullptr;
+    cursor_h_line_ = nullptr;
+    cursor_info_label_ = nullptr;
+    entry_title_ = nullptr;
+    entry_box_ = nullptr;
+    for (int i = 0; i < kMaxFuncs; ++i) {
+        input_rows_[i] = nullptr;
+        funcs_[i].checkbox = nullptr;
+        funcs_[i].expr_label = nullptr;
+        funcs_[i].color_label = nullptr;
+        for (int s = 0; s < kMaxPlotSegments; ++s) {
+            funcs_[i].segments[s] = nullptr;
+        }
+    }
+    for (int i = 0; i < kMaxTicks; ++i) {
+        x_tick_lines_[i] = nullptr;
+        y_tick_lines_[i] = nullptr;
+        x_tick_labels_[i] = nullptr;
+        y_tick_labels_[i] = nullptr;
+    }
+    menu_rows_.clear();
+    menu_open_ = false;
+    menu_kind_ = MenuKind::None;
+    entry_kind_ = EntryKind::None;
+    ui_ready_ = false;
 }
 
 void GraphApp::loadSession()
@@ -500,6 +556,14 @@ float GraphApp::plotXAt(int sample) const
     if (kPlotSamples <= 1) return plot_x_min_;
     const float t = static_cast<float>(sample) / static_cast<float>(kPlotSamples - 1);
     return plot_x_min_ + t * (plot_x_max_ - plot_x_min_);
+}
+
+float GraphApp::cursorYValue() const
+{
+    if (active_plot_func_ < 0 || active_plot_func_ >= kMaxFuncs) return NAN;
+    const PlotFunc &func = funcs_[active_plot_func_];
+    if (!func.enabled || cursor_sample_ < 0 || cursor_sample_ >= static_cast<int>(func.plot_values.size())) return NAN;
+    return func.plot_values[static_cast<size_t>(cursor_sample_)];
 }
 
 float GraphApp::finiteFallbackY() const
@@ -842,6 +906,17 @@ void GraphApp::rebuildPlotSegments(int func_index)
         }
         const int len = end_index - start;
         if (len >= 1) {
+            if (func.segments[seg] == nullptr) {
+                func.segments[seg] = createPlotLine(plot_area_, func.color, 2);
+                if (func.segments[seg] != nullptr) {
+                    lv_obj_set_style_line_rounded(func.segments[seg], true, LV_PART_MAIN);
+                    lv_obj_add_flag(func.segments[seg], LV_OBJ_FLAG_HIDDEN);
+                }
+            }
+            if (func.segments[seg] == nullptr) {
+                start = -1;
+                return;
+            }
             lv_line_set_points(func.segments[seg], &func.points[start], len);
             lv_obj_clear_flag(func.segments[seg], LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_style_line_color(func.segments[seg], func.color, LV_PART_MAIN);
@@ -888,8 +963,8 @@ void GraphApp::rebuildPlotTickLabels()
     axis_x_pts_[1] = {kDisplayW - 1, static_cast<lv_value_precise_t>(axis_y)};
     axis_y_pts_[0] = {static_cast<lv_value_precise_t>(axis_x), 0};
     axis_y_pts_[1] = {static_cast<lv_value_precise_t>(axis_x), kRootH - 1};
-    lv_line_set_points(axis_x_, axis_x_pts_.data(), 2);
-    lv_line_set_points(axis_y_, axis_y_pts_.data(), 2);
+    if (axis_x_) lv_line_set_points(axis_x_, axis_x_pts_.data(), 2);
+    if (axis_y_) lv_line_set_points(axis_y_, axis_y_pts_.data(), 2);
 
     auto pickTickValues = [&](float min_v, float max_v, float step) {
         std::vector<float> values;
@@ -934,20 +1009,24 @@ void GraphApp::rebuildPlotTickLabels()
         int px = xToPlot(x);
         tick_pts_x_[idx][0] = {static_cast<lv_value_precise_t>(px), static_cast<lv_value_precise_t>(axis_y - 3)};
         tick_pts_x_[idx][1] = {static_cast<lv_value_precise_t>(px), static_cast<lv_value_precise_t>(axis_y + 3)};
-        lv_line_set_points(x_tick_lines_[idx], tick_pts_x_[idx].data(), 2);
-        lv_obj_clear_flag(x_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
+        if (x_tick_lines_[idx]) {
+            lv_line_set_points(x_tick_lines_[idx], tick_pts_x_[idx].data(), 2);
+            lv_obj_clear_flag(x_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
+        }
         char buf[24];
         std::snprintf(buf, sizeof(buf), "%.2g", static_cast<double>(x));
-        lv_label_set_text(x_tick_labels_[idx], buf);
-        const int label_x = std::clamp(px - 12, 0, kDisplayW - 26);
-        const int label_y = std::clamp(axis_y + 4, 0, kRootH - 14);
-        lv_obj_set_pos(x_tick_labels_[idx], label_x, label_y);
-        lv_obj_clear_flag(x_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
+        if (x_tick_labels_[idx]) {
+            lv_label_set_text(x_tick_labels_[idx], buf);
+            const int label_x = std::clamp(px - 12, 0, kDisplayW - 26);
+            const int label_y = std::clamp(axis_y + 4, 0, kRootH - 14);
+            lv_obj_set_pos(x_tick_labels_[idx], label_x, label_y);
+            lv_obj_clear_flag(x_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
+        }
         ++idx;
     }
     for (; idx < kMaxTicks; ++idx) {
-        lv_obj_add_flag(x_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(x_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
+        if (x_tick_lines_[idx]) lv_obj_add_flag(x_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
+        if (x_tick_labels_[idx]) lv_obj_add_flag(x_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
     }
 
     const auto y_ticks = pickTickValues(plot_y_min_, plot_y_max_, y_step);
@@ -959,20 +1038,24 @@ void GraphApp::rebuildPlotTickLabels()
         int py = yToPlot(y);
         tick_pts_y_[idx][0] = {static_cast<lv_value_precise_t>(axis_x - 3), static_cast<lv_value_precise_t>(py)};
         tick_pts_y_[idx][1] = {static_cast<lv_value_precise_t>(axis_x + 3), static_cast<lv_value_precise_t>(py)};
-        lv_line_set_points(y_tick_lines_[idx], tick_pts_y_[idx].data(), 2);
-        lv_obj_clear_flag(y_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
+        if (y_tick_lines_[idx]) {
+            lv_line_set_points(y_tick_lines_[idx], tick_pts_y_[idx].data(), 2);
+            lv_obj_clear_flag(y_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
+        }
         char buf[24];
         std::snprintf(buf, sizeof(buf), "%.2g", static_cast<double>(y));
-        lv_label_set_text(y_tick_labels_[idx], buf);
-        const int label_x = std::clamp(axis_x + 4, 0, kDisplayW - 30);
-        const int label_y = std::clamp(py - 8, 0, kRootH - 14);
-        lv_obj_set_pos(y_tick_labels_[idx], label_x, label_y);
-        lv_obj_clear_flag(y_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
+        if (y_tick_labels_[idx]) {
+            lv_label_set_text(y_tick_labels_[idx], buf);
+            const int label_x = std::clamp(axis_x + 4, 0, kDisplayW - 30);
+            const int label_y = std::clamp(py - 8, 0, kRootH - 14);
+            lv_obj_set_pos(y_tick_labels_[idx], label_x, label_y);
+            lv_obj_clear_flag(y_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
+        }
         ++idx;
     }
     for (; idx < kMaxTicks; ++idx) {
-        lv_obj_add_flag(y_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(y_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
+        if (y_tick_lines_[idx]) lv_obj_add_flag(y_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
+        if (y_tick_labels_[idx]) lv_obj_add_flag(y_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -1098,10 +1181,6 @@ void GraphApp::updateInputPage()
 
 void GraphApp::updatePlotPage()
 {
-    if (plot_title_ == nullptr) return;
-    char buf[128];
-    std::snprintf(buf, sizeof(buf), "Plot  x:[%.2g, %.2g] y:[%.2g, %.2g]", static_cast<double>(plot_x_min_), static_cast<double>(plot_x_max_), static_cast<double>(plot_y_min_), static_cast<double>(plot_y_max_));
-    lv_label_set_text(plot_title_, buf);
 }
 
 void GraphApp::buildMenuItems()
@@ -1164,7 +1243,7 @@ void GraphApp::onMenuButtonEvent(lv_event_t *e)
         lv_obj_set_style_bg_color(target, LV_COLOR_MAKE(92, 116, 172), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(target, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_text_color(target, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
-        lv_obj_scroll_to_view(target, LV_ANIM_OFF);
+        lv_obj_scroll_to_view(target, LV_ANIM_ON);
         return;
     }
 
@@ -1191,30 +1270,33 @@ void GraphApp::onMenuButtonEvent(lv_event_t *e)
 
 void GraphApp::updateTablePage()
 {
-    if (table_status_ == nullptr) return;
-    char buf[128];
-    std::snprintf(buf, sizeof(buf), "Range %.3g..%.3g  Step %.3g", static_cast<double>(table_start_), static_cast<double>(table_end_), static_cast<double>(table_step_));
-    lv_label_set_text(table_status_, buf);
 }
 
 void GraphApp::updateMenuOverlay()
 {
-    if (menu_overlay_ == nullptr || menu_list_ == nullptr) return;
+    if (menu_overlay_ == nullptr || menu_list_ == nullptr || menu_page_ == nullptr) return;
 
     buildMenuItems();
-    lv_obj_clean(menu_list_);
+    lv_obj_clean(menu_page_);
     menu_rows_.clear();
 
     for (size_t i = 0; i < menu_items_.size(); ++i) {
         const MenuItem &item = menu_items_[i];
-        lv_obj_t *btn = lv_list_add_button(menu_list_, nullptr, item.label);
+        lv_obj_t *btn = lv_menu_cont_create(menu_page_);
         if (btn == nullptr) {
             continue;
         }
         menu_rows_.push_back(btn);
         lv_obj_set_width(btn, 206);
+        lv_obj_set_height(btn, 22);
+        lv_obj_t *label = lv_label_create(btn);
+        lv_label_set_text(label, item.label);
+        lv_obj_set_width(label, 198);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
         ui_theme::applyText14(btn);
+        ui_theme::applyText14(label);
         lv_obj_set_style_text_color(btn, LV_COLOR_MAKE(220, 230, 245), LV_PART_MAIN);
+        lv_obj_set_style_text_color(label, LV_COLOR_MAKE(220, 230, 245), LV_PART_MAIN);
         lv_obj_set_style_pad_left(btn, 4, LV_PART_MAIN);
         lv_obj_set_style_pad_right(btn, 4, LV_PART_MAIN);
         lv_obj_set_style_pad_top(btn, 1, LV_PART_MAIN);
@@ -1290,7 +1372,7 @@ void GraphApp::updateEntryOverlay()
 {
     if (entry_overlay_ == nullptr || entry_title_ == nullptr || entry_box_ == nullptr) return;
     lv_label_set_text(entry_title_, entry_title_buf_.data());
-    lv_textarea_set_text(entry_box_, entry_buffer_[0] != '\0' ? entry_buffer_ : entry_prev_buf_.data());
+    lv_textarea_set_text(entry_box_, entry_buffer_);
     lv_textarea_set_cursor_pos(entry_box_, LV_TEXTAREA_CURSOR_LAST);
 }
 
@@ -1686,16 +1768,140 @@ void GraphApp::handleTablePageInput(uint64_t newly, uint64_t current_mask)
     if (table_obj_ == nullptr) return;
 
     if ((newly & left) != 0U) {
-        lv_obj_scroll_by_bounded(table_obj_, -34, 0, LV_ANIM_OFF);
+        lv_obj_scroll_by_bounded(table_obj_, -34, 0, LV_ANIM_ON);
     }
     if ((newly & right) != 0U) {
-        lv_obj_scroll_by_bounded(table_obj_, 34, 0, LV_ANIM_OFF);
+        lv_obj_scroll_by_bounded(table_obj_, 34, 0, LV_ANIM_ON);
     }
     if ((newly & up) != 0U) {
-        lv_obj_scroll_by_bounded(table_obj_, 0, -18, LV_ANIM_OFF);
+        lv_obj_scroll_by_bounded(table_obj_, 0, -18, LV_ANIM_ON);
     }
     if ((newly & down) != 0U) {
-        lv_obj_scroll_by_bounded(table_obj_, 0, 18, LV_ANIM_OFF);
+        lv_obj_scroll_by_bounded(table_obj_, 0, 18, LV_ANIM_ON);
+    }
+}
+
+void GraphApp::handleEntryMappedKey(uint32_t key)
+{
+    if (entry_kind_ == EntryKind::None) return;
+
+    if (key == LV_KEY_ENTER) {
+        finishEntry(true);
+        return;
+    }
+    if (key == LV_KEY_ESC) {
+        finishEntry(false);
+        return;
+    }
+    if (key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
+        if (entry_length_ > 0) entry_buffer_[--entry_length_] = '\0';
+        updateEntryOverlay();
+        return;
+    }
+    if (key >= 32U && key <= 126U && entry_length_ < static_cast<int>(sizeof(entry_buffer_)) - 1) {
+        entry_buffer_[entry_length_++] = static_cast<char>(key);
+        entry_buffer_[entry_length_] = '\0';
+        updateEntryOverlay();
+    }
+}
+
+void GraphApp::handleInputPageMappedKey(uint32_t key)
+{
+    if (key == LV_KEY_UP && selected_func_ > 0) {
+        selectFunction(selected_func_ - 1);
+    } else if (key == LV_KEY_DOWN && selected_func_ + 1 < kMaxFuncs) {
+        selectFunction(selected_func_ + 1);
+    } else if (key == ' ') {
+        toggleFunction(selected_func_);
+    } else if (key == LV_KEY_ENTER) {
+        startEntry(EntryKind::FunctionExpr, selected_func_);
+    } else if (key == LV_KEY_LEFT || key == LV_KEY_RIGHT) {
+        cycleFunctionColor(selected_func_);
+    } else if (key == LV_KEY_ESC || key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
+        showPage(Page::Plot);
+    }
+}
+
+void GraphApp::handlePlotPageMappedKey(uint32_t key)
+{
+    if (region_zoom_active_) {
+        if (key == LV_KEY_ESC || key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
+            region_zoom_active_ = false;
+            region_zoom_anchor_set_ = false;
+            return;
+        }
+        if (key == LV_KEY_ENTER) {
+            if (!region_zoom_anchor_set_) {
+                region_zoom_anchor_sample_ = cursor_sample_;
+                region_zoom_anchor_set_ = true;
+            } else {
+                finishRegionZoom();
+            }
+            return;
+        }
+    }
+
+    if (key == LV_KEY_ENTER) {
+        cursor_mode_ = !cursor_mode_;
+        return;
+    }
+
+    if (!cursor_mode_) {
+        const float xr = plot_x_max_ - plot_x_min_;
+        const float yr = plot_y_max_ - plot_y_min_;
+        if (key == LV_KEY_LEFT) { plot_x_min_ -= xr * 0.12f; plot_x_max_ -= xr * 0.12f; markPlotDirty(); }
+        else if (key == LV_KEY_RIGHT) { plot_x_min_ += xr * 0.12f; plot_x_max_ += xr * 0.12f; markPlotDirty(); }
+        else if (key == LV_KEY_UP) { const float cx = (plot_x_min_ + plot_x_max_) * 0.5f; const float cy = (plot_y_min_ + plot_y_max_) * 0.5f; plot_x_min_ = cx - xr * 0.35f; plot_x_max_ = cx + xr * 0.35f; plot_y_min_ = cy - yr * 0.35f; plot_y_max_ = cy + yr * 0.35f; markPlotDirty(); }
+        else if (key == LV_KEY_DOWN) { const float cx = (plot_x_min_ + plot_x_max_) * 0.5f; const float cy = (plot_y_min_ + plot_y_max_) * 0.5f; plot_x_min_ = cx - xr * 0.75f; plot_x_max_ = cx + xr * 0.75f; plot_y_min_ = cy - yr * 0.75f; plot_y_max_ = cy + yr * 0.75f; markPlotDirty(); }
+        else if (key == 'r' || key == 'R') { resetPlotView(); }
+        return;
+    }
+
+    if (key == LV_KEY_LEFT && cursor_sample_ > 0) --cursor_sample_;
+    else if (key == LV_KEY_RIGHT && cursor_sample_ + 1 < kPlotSamples) ++cursor_sample_;
+    else if (key == LV_KEY_UP) {
+        for (int step = 1; step <= kMaxFuncs; ++step) {
+            const int idx = (active_plot_func_ + kMaxFuncs - step) % kMaxFuncs;
+            if (funcs_[idx].enabled) { active_plot_func_ = idx; break; }
+        }
+    } else if (key == LV_KEY_DOWN) {
+        for (int step = 1; step <= kMaxFuncs; ++step) {
+            const int idx = (active_plot_func_ + step) % kMaxFuncs;
+            if (funcs_[idx].enabled) { active_plot_func_ = idx; break; }
+        }
+    } else if ((key == 'z' || key == 'Z') && funcs_[active_plot_func_].enabled) {
+        char expr[256];
+        std::snprintf(expr, sizeof(expr), "solve(%s=0,x)", funcs_[active_plot_func_].expr);
+        if (services_.casService().submit(expr)) pending_kind_ = EvalKind::None;
+    } else if ((key == 'd' || key == 'D') && funcs_[active_plot_func_].enabled) {
+        char expr[256];
+        const float x0 = plotXAt(cursor_sample_);
+        std::snprintf(expr, sizeof(expr), "evalf(subst(diff(%s,x),x,%.8f))", funcs_[active_plot_func_].expr, static_cast<double>(x0));
+        if (services_.casService().submit(expr)) pending_kind_ = EvalKind::None;
+    } else if ((key == 'x' || key == 'X') && funcs_[active_plot_func_].enabled) {
+        for (int step = 1; step <= kMaxFuncs; ++step) {
+            const int idx = (active_plot_func_ + step) % kMaxFuncs;
+            if (funcs_[idx].enabled) {
+                char expr[256];
+                std::snprintf(expr, sizeof(expr), "solve(%s=%s,x)", funcs_[active_plot_func_].expr, funcs_[idx].expr);
+                services_.casService().submit(expr);
+                break;
+            }
+        }
+    }
+}
+
+void GraphApp::handleTablePageMappedKey(uint32_t key)
+{
+    if (table_obj_ == nullptr) return;
+    if (key == LV_KEY_LEFT) {
+        lv_obj_scroll_by_bounded(table_obj_, -34, 0, LV_ANIM_ON);
+    } else if (key == LV_KEY_RIGHT) {
+        lv_obj_scroll_by_bounded(table_obj_, 34, 0, LV_ANIM_ON);
+    } else if (key == LV_KEY_UP) {
+        lv_obj_scroll_by_bounded(table_obj_, 0, -18, LV_ANIM_ON);
+    } else if (key == LV_KEY_DOWN) {
+        lv_obj_scroll_by_bounded(table_obj_, 0, 18, LV_ANIM_ON);
     }
 }
 
@@ -1749,21 +1955,41 @@ void GraphApp::openPageMenu()
 
 void GraphApp::handleMappedKey(uint32_t key)
 {
-    if (key != LV_KEY_ESC) {
+    ensureUi();
+    if (key == '\t') {
+        if (entry_kind_ == EntryKind::None && !menu_open_) {
+            if (page_ == Page::Input) showPage(Page::Plot);
+            else if (page_ == Page::Plot) showPage(Page::Table);
+            else showPage(Page::Input);
+        }
         return;
     }
 
     if (entry_kind_ != EntryKind::None) {
-        finishEntry(false);
+        handleEntryMappedKey(key);
         return;
     }
 
     if (menu_open_) {
-        closeMenu();
+        if (menu_group_ == nullptr) return;
+        if (key == LV_KEY_UP || key == LV_KEY_LEFT) lv_group_focus_prev(menu_group_);
+        else if (key == LV_KEY_DOWN || key == LV_KEY_RIGHT) lv_group_focus_next(menu_group_);
+        else if (key == LV_KEY_ENTER) lv_group_send_data(menu_group_, key);
+        else if (key == LV_KEY_ESC || key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) closeMenu();
+        else lv_group_send_data(menu_group_, key);
         return;
     }
 
-    openPageMenu();
+    if (key == LV_KEY_ESC) {
+        openPageMenu();
+        return;
+    }
+
+    switch (page_) {
+    case Page::Input: handleInputPageMappedKey(key); break;
+    case Page::Plot: handlePlotPageMappedKey(key); break;
+    case Page::Table: handleTablePageMappedKey(key); break;
+    }
 }
 
 void GraphApp::render()
@@ -1779,12 +2005,35 @@ void GraphApp::render()
     scheduleNextEvaluation();
     if (page_ == Page::Plot && cursor_mode_ && cursor_line_) {
         const float px = static_cast<float>(cursor_sample_) * static_cast<float>(kDisplayW - 1) / static_cast<float>(kPlotSamples - 1);
+        const float x = plotXAt(cursor_sample_);
+        const float y = cursorYValue();
         cursor_pts_[0] = {static_cast<lv_value_precise_t>(px), 0};
         cursor_pts_[1] = {static_cast<lv_value_precise_t>(px), kRootH - 1};
         lv_line_set_points(cursor_line_, cursor_pts_.data(), 2);
         lv_obj_clear_flag(cursor_line_, LV_OBJ_FLAG_HIDDEN);
+        if (cursor_h_line_ != nullptr && std::isfinite(y)) {
+            const int py = yToPlot(y);
+            cursor_h_pts_[0] = {0, static_cast<lv_value_precise_t>(py)};
+            cursor_h_pts_[1] = {kDisplayW - 1, static_cast<lv_value_precise_t>(py)};
+            lv_line_set_points(cursor_h_line_, cursor_h_pts_.data(), 2);
+            lv_obj_clear_flag(cursor_h_line_, LV_OBJ_FLAG_HIDDEN);
+        } else if (cursor_h_line_ != nullptr) {
+            lv_obj_add_flag(cursor_h_line_, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (cursor_info_label_ != nullptr) {
+            if (std::isfinite(y)) {
+                std::snprintf(cursor_info_buf_.data(), cursor_info_buf_.size(), "f%d  x=%.3g  f(x)=%.3g", active_plot_func_ + 1, static_cast<double>(x), static_cast<double>(y));
+            } else {
+                std::snprintf(cursor_info_buf_.data(), cursor_info_buf_.size(), "f%d  x=%.3g  f(x)=nan", active_plot_func_ + 1, static_cast<double>(x));
+            }
+            lv_label_set_text(cursor_info_label_, cursor_info_buf_.data());
+            lv_obj_clear_flag(cursor_info_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(cursor_info_label_);
+        }
     } else if (cursor_line_) {
         lv_obj_add_flag(cursor_line_, LV_OBJ_FLAG_HIDDEN);
+        if (cursor_h_line_) lv_obj_add_flag(cursor_h_line_, LV_OBJ_FLAG_HIDDEN);
+        if (cursor_info_label_) lv_obj_add_flag(cursor_info_label_, LV_OBJ_FLAG_HIDDEN);
     }
 }
 

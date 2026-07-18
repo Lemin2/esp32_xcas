@@ -39,6 +39,19 @@ void PlaceholderApp::onFocus()
     }
 }
 
+void PlaceholderApp::releaseUi()
+{
+    if (title_label_ != nullptr) {
+        lv_obj_delete(title_label_);
+    }
+    if (hint_label_ != nullptr) {
+        lv_obj_delete(hint_label_);
+    }
+    title_label_ = nullptr;
+    hint_label_ = nullptr;
+    ui_ready_ = false;
+}
+
 void PlaceholderApp::handleKeyboardState(uint64_t pressedMask)
 {
     last_mask_ = pressedMask;
