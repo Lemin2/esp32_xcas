@@ -263,9 +263,17 @@ void Kernel::unlockLvgl()
 
 void Kernel::render()
 {
-    auto &app = apps_[static_cast<size_t>(router_.current())];
-    if (app) {
-        app->render();
+    // While the launcher/app-switch menu overlay covers the screen, the
+    // focused app's render() would otherwise keep doing full-cost work every
+    // frame (e.g. GraphApp re-evaluating plots and re-drawing cursor lines)
+    // purely underneath a hidden layer. Skip it so the menu stays responsive;
+    // queued CAS results simply get drained on the next frame once the menu
+    // closes, so nothing is lost.
+    if (!menu_open_) {
+        auto &app = apps_[static_cast<size_t>(router_.current())];
+        if (app) {
+            app->render();
+        }
     }
 
     ensureStatusBar();
@@ -391,6 +399,7 @@ void Kernel::ensureAppMenu()
     }
 
     menu_ready_ = true;
+    menu_index_cached_ = -1;
 }
 
 void Kernel::appMenuTileEventCb(lv_event_t *e)
@@ -445,6 +454,7 @@ void Kernel::showAppMenu(bool show)
         lv_anim_delete(menu_overlay_, nullptr);
         lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(menu_overlay_);
+        menu_index_cached_ = -1;
         if (board_.hasTouchInput()) {
             lv_obj_set_style_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
             lv_obj_set_style_translate_y(menu_overlay_, 0, LV_PART_MAIN);
@@ -488,6 +498,7 @@ void Kernel::showAppMenu(bool show)
             lv_obj_add_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_style_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
             lv_obj_set_style_translate_y(menu_overlay_, 0, LV_PART_MAIN);
+            menu_index_cached_ = -1;
             return;
         }
 
@@ -518,12 +529,24 @@ void Kernel::updateAppMenu()
         return;
     }
 
+    if (menu_index_cached_ == menu_index_) {
+        return;
+    }
+
+    const int previous_index = menu_index_cached_;
+    menu_index_cached_ = menu_index_;
+
     for (size_t i = 0; i < kRouteCount; ++i) {
         lv_obj_t *tile = menu_items_[i];
         if (tile == nullptr) {
             continue;
         }
-        const bool selected = (static_cast<int>(i) == menu_index_);
+        const int current = static_cast<int>(i);
+        const bool selected = (current == menu_index_);
+        const bool previously_selected = (current == previous_index);
+        if (!selected && !previously_selected) {
+            continue;
+        }
         if (selected) {
             lv_obj_set_style_border_color(tile, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
             lv_obj_set_style_border_width(tile, 2, LV_PART_MAIN);
@@ -739,6 +762,35 @@ void Kernel::updateStatusBar()
     const bool fn_on = fn_locked_;
     const bool shift_on = shift_locked_;
     const bool busy = casService_.busy();
+    const bool show_wifi = cfg.status_show_wifi;
+    const bool show_memory = cfg.status_show_memory;
+    const bool show_clock = cfg.status_show_clock;
+
+    const uint32_t now_minute = show_clock ? static_cast<uint32_t>(std::time(nullptr) / 60) : 0U;
+    const bool state_changed =
+        status_route_cached_ != router_.current() ||
+        status_fn_cached_ != fn_on ||
+        status_shift_cached_ != shift_on ||
+        status_busy_cached_ != busy ||
+        status_wifi_cached_ != show_wifi ||
+        status_memory_cached_ != show_memory ||
+        status_memory_mb_cached_ != cfg.status_memory_mb ||
+        status_clock_cached_ != show_clock ||
+        (show_clock && status_clock_minute_cached_ != now_minute);
+
+    if (!state_changed) {
+        return;
+    }
+
+    status_route_cached_ = router_.current();
+    status_fn_cached_ = fn_on;
+    status_shift_cached_ = shift_on;
+    status_busy_cached_ = busy;
+    status_wifi_cached_ = show_wifi;
+    status_memory_cached_ = show_memory;
+    status_memory_mb_cached_ = cfg.status_memory_mb;
+    status_clock_cached_ = show_clock;
+    status_clock_minute_cached_ = now_minute;
 
     char left[48];
     char center[64];
@@ -748,7 +800,7 @@ void Kernel::updateStatusBar()
     const char *fn_token = fn_on ? "[FN] " : "";
     const char *shift_token = shift_on ? "[CAPS] " : "";
     char link_tokens[16] = {};
-    if (cfg.status_show_wifi && wifiConnected()) {
+    if (show_wifi && wifiConnected()) {
         std::snprintf(link_tokens, sizeof(link_tokens), "Wi ");
     }
     std::snprintf(center, sizeof(center), "%s%s%s%s",
@@ -757,7 +809,7 @@ void Kernel::updateStatusBar()
                   shift_token,
                   busy ? "CAS*" : "");
 
-    if (cfg.status_show_memory) {
+    if (show_memory) {
         const uint32_t free_kb = static_cast<uint32_t>(
             (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) + heap_caps_get_free_size(MALLOC_CAP_SPIRAM)) / 1024U);
         if (cfg.status_memory_mb) {
@@ -765,7 +817,7 @@ void Kernel::updateStatusBar()
         } else {
             std::snprintf(right, sizeof(right), "%luK", static_cast<unsigned long>(free_kb));
         }
-    } else if (cfg.status_show_clock) {
+    } else if (show_clock) {
         std::time_t now = std::time(nullptr);
         std::tm tm_now = {};
         localtime_r(&now, &tm_now);
@@ -774,9 +826,18 @@ void Kernel::updateStatusBar()
         right[0] = '\0';
     }
 
-    lv_label_set_text(status_left_, left);
-    lv_label_set_text(status_center_, center);
-    lv_label_set_text(status_right_, right);
+    if (std::strcmp(status_left_cache_, left) != 0) {
+        std::snprintf(status_left_cache_, sizeof(status_left_cache_), "%s", left);
+        lv_label_set_text(status_left_, status_left_cache_);
+    }
+    if (std::strcmp(status_center_cache_, center) != 0) {
+        std::snprintf(status_center_cache_, sizeof(status_center_cache_), "%s", center);
+        lv_label_set_text(status_center_, status_center_cache_);
+    }
+    if (std::strcmp(status_right_cache_, right) != 0) {
+        std::snprintf(status_right_cache_, sizeof(status_right_cache_), "%s", right);
+        lv_label_set_text(status_right_, status_right_cache_);
+    }
 
 }
 
@@ -838,11 +899,45 @@ void Kernel::updateGlobalKeyboardBinding()
         return;
     }
 
-    lv_obj_t *textarea = findFocusedTextarea(lv_screen_active());
-    if (textarea == nullptr) {
+    if (menu_open_ && global_keyboard_textarea_ == nullptr && !global_keyboard_visible_) {
+        return;
+    }
+
+    bool raise_keyboard = false;
+
+    if (global_keyboard_textarea_ != nullptr) {
+        if (isObjectVisible(global_keyboard_textarea_) && lv_obj_has_state(global_keyboard_textarea_, LV_STATE_FOCUSED)) {
+            ensureGlobalKeyboard();
+            if (global_keyboard_ != nullptr) {
+                if (!global_keyboard_visible_) {
+                    global_keyboard_visible_ = true;
+                    lv_obj_clear_flag(global_keyboard_, LV_OBJ_FLAG_HIDDEN);
+                    raise_keyboard = true;
+                }
+                if (raise_keyboard) {
+                    lv_obj_move_foreground(global_keyboard_);
+                }
+                return;
+            }
+        }
+
+        global_keyboard_textarea_ = nullptr;
         if (global_keyboard_ != nullptr) {
             lv_keyboard_set_textarea(global_keyboard_, nullptr);
         }
+    }
+
+    if (global_keyboard_textarea_ == nullptr) {
+        ++global_keyboard_poll_skip_;
+        if ((global_keyboard_poll_skip_ & 0x03U) != 0U) {
+            return;
+        }
+    } else {
+        global_keyboard_poll_skip_ = 0;
+    }
+
+    lv_obj_t *textarea = findFocusedTextarea(lv_screen_active());
+    if (textarea == nullptr) {
         return;
     }
 
@@ -850,22 +945,35 @@ void Kernel::updateGlobalKeyboardBinding()
     if (global_keyboard_ == nullptr) {
         return;
     }
-    lv_keyboard_set_textarea(global_keyboard_, textarea);
+
+    if (textarea != global_keyboard_textarea_) {
+        global_keyboard_textarea_ = textarea;
+        global_keyboard_poll_skip_ = 0;
+        lv_keyboard_set_textarea(global_keyboard_, textarea);
+        raise_keyboard = true;
+    }
     if (!global_keyboard_visible_) {
         global_keyboard_visible_ = true;
         lv_obj_clear_flag(global_keyboard_, LV_OBJ_FLAG_HIDDEN);
+        raise_keyboard = true;
     }
-    lv_obj_move_foreground(global_keyboard_);
+    if (raise_keyboard) {
+        lv_obj_move_foreground(global_keyboard_);
+    }
 #endif
 }
 
 void Kernel::bringSystemChromeToFront()
 {
     if (status_bar_ != nullptr) {
-        lv_obj_move_foreground(status_bar_);
+        if (lv_obj_get_parent(status_bar_) != nullptr) {
+            lv_obj_move_foreground(status_bar_);
+        }
     }
     if (menu_open_ && menu_overlay_ != nullptr) {
-        lv_obj_move_foreground(menu_overlay_);
+        if (lv_obj_get_parent(menu_overlay_) != nullptr) {
+            lv_obj_move_foreground(menu_overlay_);
+        }
     }
 }
 

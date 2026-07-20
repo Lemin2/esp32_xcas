@@ -136,6 +136,8 @@ private:
     void handlePlotPageMappedKey(uint32_t key);
     void handleTablePageMappedKey(uint32_t key);
     void openPageMenu();
+    int indexForInputRow(lv_obj_t *row) const;
+    static void onInputRowEvent(lv_event_t *e);
     static void onPlotTouchEvent(lv_event_t *e);
 
     ServiceHub &services_;

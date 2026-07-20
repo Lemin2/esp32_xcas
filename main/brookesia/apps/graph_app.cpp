@@ -176,6 +176,8 @@ void GraphApp::ensureUi()
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(row, &GraphApp::onInputRowEvent, LV_EVENT_CLICKED, this);
 
         funcs_[i].checkbox = lv_checkbox_create(row);
         lv_checkbox_set_text(funcs_[i].checkbox, "");
@@ -327,7 +329,7 @@ void GraphApp::buildEntryOverlay()
     lv_obj_remove_style_all(entry_overlay_);
     const bool touch = services_.board().hasTouchInput();
     lv_obj_set_size(entry_overlay_, touch ? 520 : 232, touch ? 118 : 54);
-    lv_obj_align(entry_overlay_, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_obj_align(entry_overlay_, LV_ALIGN_CENTER, 0, 0);
     ui_theme::applyPanel(entry_overlay_, LV_COLOR_MAKE(18, 26, 42), LV_COLOR_MAKE(64, 84, 116), 8, touch ? 8 : 3, touch ? 8 : 3);
     lv_obj_set_flex_flow(entry_overlay_, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(entry_overlay_, LV_OBJ_FLAG_SCROLLABLE);
@@ -1132,7 +1134,9 @@ void GraphApp::rebuildPlotSegments(int func_index)
 
     for (int i = 0; i < kPlotSamples; ++i) {
         func.points[i].x = static_cast<lv_value_precise_t>(xToPlot(plotXAt(i)));
-        if (!std::isfinite(values[i])) {
+        const bool finite = std::isfinite(values[i]);
+        const bool in_view_y = finite && values[i] >= plot_y_min_ && values[i] <= plot_y_max_;
+        if (!in_view_y) {
             func.points[i].y = static_cast<lv_value_precise_t>(rootH() + 10);
         } else {
             func.points[i].y = static_cast<lv_value_precise_t>(yToPlot(values[i]));
@@ -1168,14 +1172,19 @@ void GraphApp::rebuildPlotSegments(int func_index)
 
     for (int i = 0; i < kPlotSamples; ++i) {
         const bool finite = std::isfinite(values[i]);
-        bool break_segment = !finite;
-        if (finite && i > 0 && std::isfinite(values[i - 1])) {
+        const bool in_view_y = finite && values[i] >= plot_y_min_ && values[i] <= plot_y_max_;
+        bool break_segment = !in_view_y;
+        if (in_view_y && i > 0) {
+            const bool prev_finite = std::isfinite(values[i - 1]);
+            const bool prev_in_view_y = prev_finite && values[i - 1] >= plot_y_min_ && values[i - 1] <= plot_y_max_;
+            if (prev_in_view_y) {
             const float dy = std::fabs(func.points[i].y - func.points[i - 1].y);
             if (dy > static_cast<float>(rootH()) * 0.72f) {
                 break_segment = true;
             }
+            }
         }
-        if (finite && !break_segment && start < 0) {
+        if (in_view_y && !break_segment && start < 0) {
             start = i;
         }
         if (break_segment) {
@@ -1436,6 +1445,33 @@ void GraphApp::updateInputPage()
             }
         }
     }
+}
+
+int GraphApp::indexForInputRow(lv_obj_t *row) const
+{
+    for (int i = 0; i < kMaxFuncs; ++i) {
+        if (input_rows_[i] == row) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void GraphApp::onInputRowEvent(lv_event_t *e)
+{
+    auto *self = static_cast<GraphApp *>(lv_event_get_user_data(e));
+    if (self == nullptr) {
+        return;
+    }
+
+    const lv_obj_t *target = lv_event_get_current_target_obj(e);
+    const int index = self->indexForInputRow(const_cast<lv_obj_t *>(target));
+    if (index < 0 || index >= kMaxFuncs) {
+        return;
+    }
+
+    self->selectFunction(index);
+    self->startEntry(EntryKind::FunctionExpr, index);
 }
 
 void GraphApp::updatePlotPage()
@@ -1832,13 +1868,17 @@ void GraphApp::handleEntryMappedKey(uint32_t key)
     }
     if (key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
         if (entry_length_ > 0) entry_buffer_[--entry_length_] = '\0';
-        updateEntryOverlay();
+        if (entry_box_ != nullptr) {
+            lv_textarea_delete_char(entry_box_);
+        }
         return;
     }
     if (key >= 32U && key <= 126U && entry_length_ < static_cast<int>(sizeof(entry_buffer_)) - 1) {
         entry_buffer_[entry_length_++] = static_cast<char>(key);
         entry_buffer_[entry_length_] = '\0';
-        updateEntryOverlay();
+        if (entry_box_ != nullptr) {
+            lv_textarea_add_char(entry_box_, static_cast<uint32_t>(key));
+        }
     }
 }
 
