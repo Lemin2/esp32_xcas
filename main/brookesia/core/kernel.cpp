@@ -367,19 +367,21 @@ void Kernel::ensureAppMenu()
         lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(tile, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-        static lv_style_prop_t trans_props[] = {
-            LV_STYLE_OUTLINE_WIDTH,
-            LV_STYLE_TRANSFORM_WIDTH,
-            LV_STYLE_TRANSFORM_HEIGHT,
-            LV_STYLE_PROP_INV,
-        };
-        static lv_style_transition_dsc_t trans_dsc;
-        static bool trans_inited = false;
-        if (!trans_inited) {
-            lv_style_transition_dsc_init(&trans_dsc, trans_props, lv_anim_path_ease_out, 140, 0, nullptr);
-            trans_inited = true;
+        if (settings::get().ui_animations_enabled) {
+            static lv_style_prop_t trans_props[] = {
+                LV_STYLE_OUTLINE_WIDTH,
+                LV_STYLE_TRANSFORM_WIDTH,
+                LV_STYLE_TRANSFORM_HEIGHT,
+                LV_STYLE_PROP_INV,
+            };
+            static lv_style_transition_dsc_t trans_dsc;
+            static bool trans_inited = false;
+            if (!trans_inited) {
+                lv_style_transition_dsc_init(&trans_dsc, trans_props, lv_anim_path_ease_out, 140, 0, nullptr);
+                trans_inited = true;
+            }
+            lv_obj_set_style_transition(tile, &trans_dsc, LV_PART_MAIN);
         }
-        lv_obj_set_style_transition(tile, &trans_dsc, LV_PART_MAIN);
 
         lv_obj_t *icon = lv_label_create(tile);
         lv_obj_add_flag(icon, LV_OBJ_FLAG_EVENT_BUBBLE);
@@ -454,7 +456,19 @@ void Kernel::showAppMenu(bool show)
         lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(menu_overlay_);
         menu_index_cached_ = -1;
+        const bool animations_enabled = settings::get().ui_animations_enabled;
         if (board_->hasTouchInput()) {
+            lv_obj_set_style_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_translate_y(menu_overlay_, 0, LV_PART_MAIN);
+            updateAppMenu();
+            if (menu_group_ != nullptr) {
+                lv_group_set_default(menu_group_);
+                lv_group_focus_obj(menu_items_[menu_index_]);
+            }
+            return;
+        }
+
+        if (!animations_enabled) {
             lv_obj_set_style_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
             lv_obj_set_style_translate_y(menu_overlay_, 0, LV_PART_MAIN);
             updateAppMenu();
@@ -493,7 +507,16 @@ void Kernel::showAppMenu(bool show)
         }
     } else {
         lv_anim_delete(menu_overlay_, nullptr);
+        const bool animations_enabled = settings::get().ui_animations_enabled;
         if (board_->hasTouchInput()) {
+            lv_obj_add_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_translate_y(menu_overlay_, 0, LV_PART_MAIN);
+            menu_index_cached_ = -1;
+            return;
+        }
+
+        if (!animations_enabled) {
             lv_obj_add_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_style_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
             lv_obj_set_style_translate_y(menu_overlay_, 0, LV_PART_MAIN);

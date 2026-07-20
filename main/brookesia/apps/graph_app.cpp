@@ -9,6 +9,7 @@
 
 #include "esp_timer.h"
 
+#include "brookesia/core/app_settings.hpp"
 #include "brookesia/core/ui_theme.hpp"
 #include "brookesia/apps/fs_util.hpp"
 
@@ -1538,7 +1539,7 @@ void GraphApp::onMenuButtonEvent(lv_event_t *e)
         lv_obj_set_style_bg_color(target, LV_COLOR_MAKE(92, 116, 172), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(target, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_text_color(target, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
-        lv_obj_scroll_to_view(target, LV_ANIM_ON);
+        lv_obj_scroll_to_view(target, settings::get().ui_animations_enabled ? LV_ANIM_ON : LV_ANIM_OFF);
         return;
     }
 
@@ -1972,13 +1973,13 @@ void GraphApp::handleTablePageMappedKey(uint32_t key)
 {
     if (table_obj_ == nullptr) return;
     if (key == LV_KEY_LEFT) {
-        lv_obj_scroll_by_bounded(table_obj_, -34, 0, LV_ANIM_ON);
+        lv_obj_scroll_by_bounded(table_obj_, -34, 0, settings::get().ui_animations_enabled ? LV_ANIM_ON : LV_ANIM_OFF);
     } else if (key == LV_KEY_RIGHT) {
-        lv_obj_scroll_by_bounded(table_obj_, 34, 0, LV_ANIM_ON);
+        lv_obj_scroll_by_bounded(table_obj_, 34, 0, settings::get().ui_animations_enabled ? LV_ANIM_ON : LV_ANIM_OFF);
     } else if (key == LV_KEY_UP) {
-        lv_obj_scroll_by_bounded(table_obj_, 0, -18, LV_ANIM_ON);
+        lv_obj_scroll_by_bounded(table_obj_, 0, -18, settings::get().ui_animations_enabled ? LV_ANIM_ON : LV_ANIM_OFF);
     } else if (key == LV_KEY_DOWN) {
-        lv_obj_scroll_by_bounded(table_obj_, 0, 18, LV_ANIM_ON);
+        lv_obj_scroll_by_bounded(table_obj_, 0, 18, settings::get().ui_animations_enabled ? LV_ANIM_ON : LV_ANIM_OFF);
     }
 }
 

@@ -29,6 +29,7 @@ public:
 private:
     enum class Page : uint8_t {
         Root,
+        Animations,
         Calculator,
         Wifi,
         Bluetooth,
@@ -37,12 +38,14 @@ private:
     };
 
     enum class Item : uint8_t {
+        AnimationsPage,
         CalcPage,
         ClockPage,
         StatusBarPage,
         Angle,
         Precision,
         FormulaPreviewMode,
+        GlobalAnimations,
         FnSwitch,
         WifiPage,
         BtPage,
@@ -79,7 +82,7 @@ private:
         bool disabled = false;
     };
 
-    static constexpr int kMaxMenuEntries = 30;
+    static constexpr int kMaxMenuEntries = 32;
 
     void ensureUi();
     void refreshMenu();
@@ -121,6 +124,7 @@ private:
     lv_obj_t *root_ = nullptr;
     lv_obj_t *menu_ = nullptr;
     lv_obj_t *root_page_ = nullptr;
+    lv_obj_t *animations_page_ = nullptr;
     lv_obj_t *calc_page_ = nullptr;
     lv_obj_t *wifi_page_ = nullptr;
     lv_obj_t *bt_page_ = nullptr;
@@ -135,6 +139,7 @@ private:
     int angle_index_ = 0;  // 0 = RAD, 1 = DEG
     int digits_index_ = 0; // index into digits table
     int formula_preview_mode_ = 0;
+    bool global_animations_enabled_ = true;
     bool fn_app_switch_enabled_ = false;
     bool wifi_enabled_ = false;
     bool bt_hid_enabled_ = false;

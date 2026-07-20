@@ -8,6 +8,7 @@ struct AppSettings {
     int angle_index = 0;
     int digits_index = 0;
     int formula_preview_mode = 0; // 0 = graphic objects, 1 = text fallback
+    bool ui_animations_enabled = true;
     bool fn_app_switch_enabled = false;
     bool wifi_enabled = false;
     bool bt_hid_enabled = false;

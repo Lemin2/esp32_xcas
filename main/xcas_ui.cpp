@@ -2358,7 +2358,8 @@ namespace xcas
         refreshHistoryList();
         // Auto-scroll to bottom for new results (only if no manual selection active)
         if (selected_history_index_ < 0) {
-            lv_obj_scroll_to_y(history_panel_, LV_COORD_MAX, LV_ANIM_ON);
+            lv_obj_scroll_to_y(history_panel_, LV_COORD_MAX,
+                               brookesia::settings::get().ui_animations_enabled ? LV_ANIM_ON : LV_ANIM_OFF);
         }
     }
 
@@ -2614,7 +2615,8 @@ namespace xcas
            // selected entry instead of pixel-stepping the whole panel.
         lv_obj_t *row = lv_obj_get_child(history_list_, index);
         if (row != nullptr) {
-              lv_obj_scroll_to_view_recursive(row, LV_ANIM_ON);
+              lv_obj_scroll_to_view_recursive(row,
+                                              brookesia::settings::get().ui_animations_enabled ? LV_ANIM_ON : LV_ANIM_OFF);
         }
 
         if (!applyToInput || input_box_ == nullptr) return;
@@ -2833,7 +2835,7 @@ namespace xcas
         initializeLvgl();
 
         if (editor_fullscreen_ && preview_use_objects_ && preview_paint_pending_) {
-            stepFullscreenPreviewPaint(kBoardTab5 ? 32 : 96, kBoardTab5 ? 8 : 48);
+            stepFullscreenPreviewPaint(kBoardTab5 ? 32 : 48, kBoardTab5 ? 8 : 24);
         }
 
         std::string result;

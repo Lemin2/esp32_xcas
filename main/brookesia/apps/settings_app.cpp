@@ -191,12 +191,14 @@ void SettingsApp::ensureUi()
     lv_group_set_editing(group_, false);
 
     root_page_ = lv_menu_page_create(menu_, "System");
+    animations_page_ = lv_menu_page_create(menu_, "Animations");
     calc_page_ = lv_menu_page_create(menu_, "Calculator");
     wifi_page_ = lv_menu_page_create(menu_, "WiFi");
     bt_page_ = lv_menu_page_create(menu_, "Bluetooth");
     clock_page_ = lv_menu_page_create(menu_, "Clock");
     status_page_ = lv_menu_page_create(menu_, "Status bar");
 
+    MenuEntry *animations_root = addMenuEntry(root_page_, Page::Root, Item::AnimationsPage, "Animations");
     MenuEntry *calc_root = addMenuEntry(root_page_, Page::Root, Item::CalcPage, "Calculator");
     MenuEntry *wifi_root = addMenuEntry(root_page_, Page::Root, Item::WifiPage, "WiFi");
     MenuEntry *bt_root = addMenuEntry(root_page_, Page::Root, Item::BtPage, "Bluetooth");
@@ -206,6 +208,9 @@ void SettingsApp::ensureUi()
     addMenuEntry(root_page_, Page::Root, Item::Memory, "Memory");
     addMenuEntry(root_page_, Page::Root, Item::ClearSession, "Clear session");
 
+    if (animations_root != nullptr) {
+        lv_menu_set_load_page_event(menu_, animations_root->row, animations_page_);
+    }
     if (calc_root != nullptr) {
         lv_menu_set_load_page_event(menu_, calc_root->row, calc_page_);
     }
@@ -221,6 +226,8 @@ void SettingsApp::ensureUi()
     if (status_root != nullptr) {
         lv_menu_set_load_page_event(menu_, status_root->row, status_page_);
     }
+
+    addMenuEntry(animations_page_, Page::Animations, Item::GlobalAnimations, "Global animations", true);
 
     addMenuEntry(calc_page_, Page::Calculator, Item::Angle, "Angle mode");
     addMenuEntry(calc_page_, Page::Calculator, Item::Precision, "Precision");
@@ -371,6 +378,9 @@ void SettingsApp::setCurrentPage(Page page)
     current_page_ = page;
     if (menu_ != nullptr) {
         lv_obj_t *page_obj = root_page_;
+        if (page == Page::Animations) {
+            page_obj = animations_page_;
+        } else 
         if (page == Page::Calculator) {
             page_obj = calc_page_;
         } else if (page == Page::Wifi) {
@@ -406,6 +416,14 @@ void SettingsApp::refreshMenu()
 
     if (MenuEntry *entry = findEntry(Item::FormulaPreviewMode); entry != nullptr && entry->value != nullptr) {
         lv_label_set_text(entry->value, kPreviewModeValues[formula_preview_mode_]);
+    }
+
+    if (MenuEntry *entry = findEntry(Item::GlobalAnimations); entry != nullptr && entry->toggle != nullptr) {
+        if (global_animations_enabled_) {
+            lv_obj_add_state(entry->toggle, LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(entry->toggle, LV_STATE_CHECKED);
+        }
     }
 
     if (MenuEntry *entry = findEntry(Item::FnSwitch); entry != nullptr && entry->toggle != nullptr) {
@@ -569,7 +587,7 @@ void SettingsApp::refreshMenu()
     }
 
     if (MenuEntry *entry = findEntry(selected_item_); entry != nullptr && entry->row != nullptr) {
-        lv_obj_scroll_to_view(entry->row, LV_ANIM_ON);
+        lv_obj_scroll_to_view(entry->row, settings::get().ui_animations_enabled ? LV_ANIM_ON : LV_ANIM_OFF);
     }
 }
 
@@ -619,6 +637,12 @@ void SettingsApp::applyHorizontalAction(int dir)
         cfg.formula_preview_mode = formula_preview_mode_;
         settings::set(cfg);
         settings::save();
+    } else if (selected_item_ == Item::GlobalAnimations) {
+        global_animations_enabled_ = !global_animations_enabled_;
+        settings::AppSettings cfg = settings::get();
+        cfg.ui_animations_enabled = global_animations_enabled_;
+        settings::set(cfg);
+        settings::save();
     } else if (selected_item_ == Item::FnSwitch) {
         fn_app_switch_enabled_ = !fn_app_switch_enabled_;
         applyFnSwitch();
@@ -666,7 +690,9 @@ void SettingsApp::activateSelected()
         return;
     }
 
-    if (selected_item_ == Item::CalcPage) {
+    if (selected_item_ == Item::AnimationsPage) {
+        setCurrentPage(Page::Animations);
+    } else if (selected_item_ == Item::CalcPage) {
         setCurrentPage(Page::Calculator);
     } else if (selected_item_ == Item::WifiPage) {
         setCurrentPage(Page::Wifi);
@@ -677,7 +703,7 @@ void SettingsApp::activateSelected()
     } else if (selected_item_ == Item::StatusBarPage) {
         setCurrentPage(Page::StatusBar);
     } else if (selected_item_ == Item::WifiEnable || selected_item_ == Item::BtEnable ||
-               selected_item_ == Item::FnSwitch || selected_item_ == Item::SdCard ||
+               selected_item_ == Item::GlobalAnimations || selected_item_ == Item::FnSwitch || selected_item_ == Item::SdCard ||
                selected_item_ == Item::Angle || selected_item_ == Item::Precision ||
                selected_item_ == Item::FormulaPreviewMode ||
                selected_item_ == Item::ClockDate || selected_item_ == Item::ClockTime ||
@@ -1103,6 +1129,7 @@ void SettingsApp::onFocus()
     angle_index_ = (cfg.angle_index == 1) ? 1 : 0;
     digits_index_ = (cfg.digits_index >= 0 && cfg.digits_index < kDigitsCount) ? cfg.digits_index : 0;
     formula_preview_mode_ = (cfg.formula_preview_mode >= 0 && cfg.formula_preview_mode < kPreviewModeCount) ? cfg.formula_preview_mode : 0;
+    global_animations_enabled_ = cfg.ui_animations_enabled;
     fn_app_switch_enabled_ = cfg.fn_app_switch_enabled;
     wifi_enabled_ = kWifiBuilt && cfg.wifi_enabled;
     bt_hid_enabled_ = kBtBuilt && cfg.bt_hid_enabled;
@@ -1169,6 +1196,7 @@ void SettingsApp::releaseUi()
     current_page_ = Page::Root;
     editing_ = false;
     ui_ready_ = false;
+    animations_page_ = nullptr;
 }
 
 void SettingsApp::handleMappedKey(uint32_t key)

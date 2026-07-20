@@ -10,6 +10,7 @@
 #include "cardputer_bsp/cardputer_bsp.hpp"
 
 #include "brookesia/apps/fs_util.hpp"
+#include "brookesia/core/app_settings.hpp"
 #include "brookesia/core/ui_theme.hpp"
 
 namespace ui_theme = brookesia::ui_theme;
@@ -267,7 +268,8 @@ void ProjectApp::refreshSelection()
         }
         styleMenuEntry(menu_entries_[i], i == selected_);
         if (i == selected_) {
-            lv_obj_scroll_to_view(menu_entries_[i].row, LV_ANIM_ON);
+            lv_obj_scroll_to_view(menu_entries_[i].row,
+                                 settings::get().ui_animations_enabled ? LV_ANIM_ON : LV_ANIM_OFF);
         }
     }
 }
