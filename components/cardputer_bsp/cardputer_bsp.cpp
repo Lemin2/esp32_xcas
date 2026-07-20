@@ -1,13 +1,14 @@
-#include "cardputer_bsp.hpp"
+#include "cardputer_bsp/cardputer_bsp.hpp"
 
-#include <cstring>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/uart.h"
 #include "esp_check.h"
+#include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
@@ -17,14 +18,6 @@
 #include "esp_timer.h"
 #include "lvgl.h"
 #include "sdkconfig.h"
-
-#if CONFIG_XCAS_BOARD_TAB5
-#include "bsp/esp-bsp.h"
-#include "bsp/display.h"
-#if CONFIG_XCAS_ENABLE_USB_HID_INPUT
-#include "esp_lvgl_port_usbhid.h"
-#endif
-#endif
 
 namespace board {
 namespace {
@@ -178,48 +171,6 @@ bool CardputerBsp::onColorTransferDone(esp_lcd_panel_io_handle_t, esp_lcd_panel_
 
 void CardputerBsp::initializeDisplay()
 {
-#if CONFIG_XCAS_BOARD_TAB5
-    bsp_display_cfg_t display_cfg = {
-        .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
-        .buffer_size = BSP_LCD_H_RES * BSP_LCD_V_RES,
-        .double_buffer = true,
-        .flags = {
-            .buff_dma = true,
-            .buff_spiram = true,
-            .sw_rotate = true,
-        },
-    };
-    display_cfg.lvgl_port_cfg.task_priority = 5;
-    display_cfg.lvgl_port_cfg.task_stack = 8192;
-    display_cfg.lvgl_port_cfg.task_affinity = 0;
-    display_cfg.lvgl_port_cfg.task_max_sleep_ms = 20;
-    external_display_ = bsp_display_start_with_config(&display_cfg);
-    if (external_display_ == nullptr) {
-        ESP_LOGE(kTag, "Tab5 BSP display start failed");
-        return;
-    }
-    lv_display_set_rotation(external_display_, LV_DISPLAY_ROTATION_90);
-    touch_indev_ = bsp_display_get_input_dev();
-#if CONFIG_XCAS_ENABLE_USB_HID_INPUT
-    esp_err_t usb_ret = bsp_usb_host_start(BSP_USB_HOST_POWER_MODE_USB_DEV, false);
-    if (usb_ret == ESP_OK) {
-#ifdef ESP_LVGL_PORT_USB_HOST_HID_COMPONENT
-        const lvgl_port_hid_keyboard_cfg_t hid_keyboard_cfg = {
-            .disp = external_display_,
-        };
-        usb_hid_keyboard_indev_ = lvgl_port_add_usb_hid_keyboard_input(&hid_keyboard_cfg);
-        ESP_LOGI(kTag, "USB HID keyboard %s", usb_hid_keyboard_indev_ != nullptr ? "enabled" : "not available");
-#else
-        ESP_LOGW(kTag, "USB HID keyboard requested but usb_host_hid component is unavailable");
-#endif
-    } else {
-        ESP_LOGW(kTag, "USB host start failed: %s", esp_err_to_name(usb_ret));
-    }
-#endif
-    (void)bsp_display_brightness_set(100);
-    ESP_LOGI(kTag, "Tab5 display initialized: %dx%d touch=%s",
-             displayWidth(), displayHeight(), touch_indev_ != nullptr ? "yes" : "no");
-#else
     gpio_config_t backlight_config = {};
     backlight_config.pin_bit_mask = (1ULL << kPinLcdBl);
     backlight_config.mode = GPIO_MODE_OUTPUT;
@@ -257,7 +208,7 @@ void CardputerBsp::initializeDisplay()
 
     esp_lcd_panel_dev_config_t panel_config = {};
     panel_config.reset_gpio_num = kPinLcdRst;
-    panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR;
+    panel_config.rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB;
     panel_config.data_endian = LCD_RGB_DATA_ENDIAN_LITTLE;
     panel_config.bits_per_pixel = kDisplayBitsPerPixel;
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel_));
@@ -268,7 +219,7 @@ void CardputerBsp::initializeDisplay()
     ESP_ERROR_CHECK(esp_lcd_panel_set_gap(panel_, 40, 52));
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, true));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
-    
+
     if (screenshot_buf_ == nullptr) {
         screenshot_buf_ = static_cast<uint16_t *>(heap_caps_malloc(
             static_cast<size_t>(kDisplayWidth) * kDisplayHeight * sizeof(uint16_t), MALLOC_CAP_8BIT));
@@ -278,15 +229,11 @@ void CardputerBsp::initializeDisplay()
             ESP_LOGW(kTag, "screenshot shadow buffer allocation failed");
         }
     }
-#endif
 }
 
 void CardputerBsp::initializeKeyboard()
 {
-#if !CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD
-    ESP_LOGI(kTag, "physical keyboard disabled");
-    return;
-#else
+#if defined(CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD) && CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD
     gpio_config_t selector_config = {};
     selector_config.pin_bit_mask = (1ULL << kPinKbdA0) | (1ULL << kPinKbdA1) | (1ULL << kPinKbdA2);
     selector_config.mode = GPIO_MODE_OUTPUT;
@@ -308,15 +255,13 @@ void CardputerBsp::initializeKeyboard()
     ESP_ERROR_CHECK(gpio_config(&column_config));
 
     setKeyboardRow(0);
+#else
+    ESP_LOGI(kTag, "physical keyboard disabled");
 #endif
 }
 
 void CardputerBsp::initializeMidiUart()
 {
-#if CONFIG_XCAS_BOARD_TAB5
-    ESP_LOGI(kTag, "MIDI UART not configured for Tab5 BSP path");
-    return;
-#else
     uart_config_t uart_config = {};
     uart_config.baud_rate = kMidiSynthBaudRate;
     uart_config.data_bits = UART_DATA_8_BITS;
@@ -328,7 +273,6 @@ void CardputerBsp::initializeMidiUart()
     ESP_ERROR_CHECK(uart_driver_install(kMidiSynthUart, kMidiSynthRxBufferLen, kMidiSynthTxBufferLen, 0, nullptr, 0));
     ESP_ERROR_CHECK(uart_param_config(kMidiSynthUart, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(kMidiSynthUart, kPinPortATx, kPinPortARx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-#endif
 }
 
 int CardputerBsp::displayWidth() const
@@ -337,11 +281,7 @@ int CardputerBsp::displayWidth() const
     if (disp != nullptr) {
         return lv_display_get_horizontal_resolution(disp);
     }
-#if CONFIG_XCAS_BOARD_TAB5
-    return BSP_LCD_H_RES;
-#else
     return kDisplayWidth;
-#endif
 }
 
 int CardputerBsp::displayHeight() const
@@ -350,11 +290,7 @@ int CardputerBsp::displayHeight() const
     if (disp != nullptr) {
         return lv_display_get_vertical_resolution(disp);
     }
-#if CONFIG_XCAS_BOARD_TAB5
-    return BSP_LCD_V_RES;
-#else
     return kDisplayHeight;
-#endif
 }
 
 int CardputerBsp::statusBarHeight() const
@@ -367,25 +303,17 @@ int CardputerBsp::statusBarHeight() const
 
 bool CardputerBsp::usesExternalLvglPort() const
 {
-#if CONFIG_XCAS_BOARD_TAB5
-    return true;
-#else
     return false;
-#endif
 }
 
 bool CardputerBsp::hasTouchInput() const
 {
-#if CONFIG_XCAS_BOARD_TAB5
-    return touch_indev_ != nullptr;
-#else
     return false;
-#endif
 }
 
 bool CardputerBsp::hasPhysicalKeyboard() const
 {
-#if CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD
+#if defined(CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD) && CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD
     return true;
 #else
     return false;
@@ -394,50 +322,31 @@ bool CardputerBsp::hasPhysicalKeyboard() const
 
 bool CardputerBsp::lockLvgl(uint32_t timeout_ms)
 {
-#if CONFIG_XCAS_BOARD_TAB5
-    return bsp_display_lock(timeout_ms);
-#else
     (void)timeout_ms;
     return true;
-#endif
 }
 
 void CardputerBsp::unlockLvgl()
 {
-#if CONFIG_XCAS_BOARD_TAB5
-    bsp_display_unlock();
-#endif
 }
 
 lv_indev_t *CardputerBsp::touchInputDevice() const
 {
-    return touch_indev_;
+    return nullptr;
 }
 
 void CardputerBsp::presentFrame(const uint16_t *framebuffer)
 {
-#if CONFIG_XCAS_BOARD_TAB5
-    (void)framebuffer;
-#else
     ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_, 0, 0, kDisplayWidth, kDisplayHeight, framebuffer));
     stashScreenshotRegion(0, 0, kDisplayWidth, kDisplayHeight, framebuffer);
     xSemaphoreTake(lcd_flush_done_, portMAX_DELAY);
-#endif
 }
 
 void CardputerBsp::presentArea(int x1, int y1, int x2, int y2, const uint16_t *pixels)
 {
-#if CONFIG_XCAS_BOARD_TAB5
-    (void)x1;
-    (void)y1;
-    (void)x2;
-    (void)y2;
-    (void)pixels;
-#else
     ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_, x1, y1, x2, y2, pixels));
     stashScreenshotRegion(x1, y1, x2, y2, pixels);
     xSemaphoreTake(lcd_flush_done_, portMAX_DELAY);
-#endif
 }
 
 void CardputerBsp::stashScreenshotRegion(int x1, int y1, int x2, int y2, const uint16_t *pixels)
@@ -470,8 +379,6 @@ bool CardputerBsp::beginScreenshotCapture()
 
 void CardputerBsp::endScreenshotCapture()
 {
-    // Keep the shadow buffer persistent to accumulate full-screen content
-    // across incremental LVGL flushes.
 }
 
 void CardputerBsp::emitScreenshot()
@@ -490,7 +397,6 @@ void CardputerBsp::emitScreenshot()
     printf("SHOT_BEGIN w=%d h=%d fmt=rgb565le bytes=%u\n", kDisplayWidth, kDisplayHeight,
            static_cast<unsigned>(total));
 
-    // 16 groups of 3 input bytes -> 64 base64 chars per emitted line.
     char line[65];
     size_t i = 0;
     while (i < total) {
@@ -515,7 +421,7 @@ void CardputerBsp::emitScreenshot()
 
 uint64_t CardputerBsp::scanKeyboardState()
 {
-#if !CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD
+#if !defined(CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD) || !CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD
     return 0;
 #else
     uint64_t pressed = 0;
@@ -623,26 +529,15 @@ bool CardputerBsp::popMappedKey(uint32_t &key)
 
 void CardputerBsp::writeMidi(const uint8_t *data, std::size_t len)
 {
-#if CONFIG_XCAS_BOARD_TAB5
-    (void)data;
-    (void)len;
-#else
     const int written = uart_write_bytes(kMidiSynthUart, data, len);
     if (written != static_cast<int>(len)) {
         ESP_LOGW(kTag, "PORT.A short write: %d", written);
     }
-#endif
 }
 
 int CardputerBsp::readMidiByte(uint8_t *byte, TickType_t timeout)
 {
-#if CONFIG_XCAS_BOARD_TAB5
-    (void)byte;
-    (void)timeout;
-    return 0;
-#else
     return uart_read_bytes(kMidiSynthUart, byte, 1, timeout);
-#endif
 }
 
 void CardputerBsp::setKeyboardRow(uint8_t row)
@@ -650,6 +545,11 @@ void CardputerBsp::setKeyboardRow(uint8_t row)
     gpio_set_level(kPinKbdA0, row & 0x01U);
     gpio_set_level(kPinKbdA1, (row >> 1) & 0x01U);
     gpio_set_level(kPinKbdA2, (row >> 2) & 0x01U);
+}
+
+std::unique_ptr<IBsp> createSelectedBsp()
+{
+    return std::make_unique<CardputerBsp>();
 }
 
 } // namespace board

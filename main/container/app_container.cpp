@@ -20,7 +20,7 @@ uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
 
 class CalcApp final : public AppLifecycle {
 public:
-    CalcApp(board::CardputerBsp &board, xcas::XcasService &service) : ui_(board, service) {}
+    CalcApp(board::IBsp &board, xcas::XcasService &service) : ui_(board, service) {}
 
     bool init() override
     {
@@ -43,12 +43,16 @@ private:
 
 } // namespace
 
-AppContainer::AppContainer() : services_(board_, casService_) {}
+AppContainer::AppContainer()
+        : board_(board::createSelectedBsp()),
+            services_(*board_, casService_)
+{
+}
 
 bool AppContainer::start()
 {
-    board_.initializeDisplay();
-    board_.initializeKeyboard();
+    board_->initializeDisplay();
+    board_->initializeKeyboard();
     drawBootSplash();
 
     if (!casService_.start()) {
@@ -70,8 +74,8 @@ bool AppContainer::start()
 
 uint64_t AppContainer::scanKeyboardState()
 {
-    board_.updateKeyboard();
-    return board_.keyboardState();
+    board_->updateKeyboard();
+    return board_->keyboardState();
 }
 
 void AppContainer::handleKeyboardState(uint64_t pressedMask)
@@ -83,7 +87,7 @@ void AppContainer::render()
 {
     if (calcApp_) {
         uint32_t key = 0;
-        while (board_.popMappedKey(key)) {
+        while (board_->popMappedKey(key)) {
             calcApp_->handleMappedKey(key);
         }
         calcApp_->render();
@@ -92,23 +96,23 @@ void AppContainer::render()
 
 void AppContainer::drawBootSplash()
 {
-    if (board_.usesExternalLvglPort()) {
+    if (board_->usesExternalLvglPort()) {
         ESP_LOGI(kTag, "boot splash skipped; external LVGL port active");
         return;
     }
 
-    std::vector<uint16_t> line(static_cast<size_t>(board_.displayWidth()));
-    for (int y = 0; y < board_.displayHeight(); ++y) {
+    std::vector<uint16_t> line(static_cast<size_t>(board_->displayWidth()));
+    for (int y = 0; y < board_->displayHeight(); ++y) {
         uint16_t color = rgb565(20, 20, 20);
-        if (y < board_.displayHeight() / 3) {
+        if (y < board_->displayHeight() / 3) {
             color = rgb565(220, 40, 40);
-        } else if (y < (board_.displayHeight() * 2) / 3) {
+        } else if (y < (board_->displayHeight() * 2) / 3) {
             color = rgb565(40, 190, 70);
         } else {
             color = rgb565(40, 110, 220);
         }
         std::fill(line.begin(), line.end(), color);
-        board_.presentArea(0, y, board_.displayWidth(), y + 1, line.data());
+        board_->presentArea(0, y, board_->displayWidth(), y + 1, line.data());
     }
     ESP_LOGI(kTag, "boot splash rendered");
 }

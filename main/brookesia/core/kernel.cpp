@@ -64,11 +64,6 @@ void animHideComplete(lv_anim_t *a)
     lv_obj_set_style_translate_y(obj, 0, LV_PART_MAIN);
 }
 
-bool isCalcRoute(Route route)
-{
-    return route == Route::Calc;
-}
-
 bool wifiConnected()
 {
 #if CONFIG_XCAS_ENABLE_WIFI
@@ -81,14 +76,18 @@ bool wifiConnected()
 
 } // namespace
 
-Kernel::Kernel() : services_(board_, casService_) {}
+Kernel::Kernel()
+        : board_(board::createSelectedBsp()),
+            services_(*board_, casService_)
+{
+}
 
 bool Kernel::start()
 {
     settings::load();
 
-    board_.initializeDisplay();
-    board_.initializeKeyboard();
+    board_->initializeDisplay();
+    board_->initializeKeyboard();
     drawBootSplash();
 
     if (!casService_.start()) {
@@ -108,37 +107,37 @@ bool Kernel::start()
 
 uint64_t Kernel::scanKeyboardState()
 {
-    return board_.scanKeyboardState();
+    return board_->scanKeyboardState();
 }
 
 void Kernel::updateKeyboard()
 {
-    board_.updateKeyboard();
+    board_->updateKeyboard();
 }
 
 uint64_t Kernel::keyboardState() const
 {
-    return board_.keyboardState();
+    return board_->keyboardState();
 }
 
 bool Kernel::fnActive() const
 {
-    return board_.fnActive();
+    return board_->fnActive();
 }
 
 bool Kernel::shiftActive() const
 {
-    return board_.shiftActive();
+    return board_->shiftActive();
 }
 
 bool Kernel::popMappedKey(uint32_t &key)
 {
-    return board_.popMappedKey(key);
+    return board_->popMappedKey(key);
 }
 
 void Kernel::pushMappedKey(uint32_t key)
 {
-    board_.pushMappedKey(key);
+    board_->pushMappedKey(key);
 }
 
 void Kernel::setModifierState(bool fnActive, bool shiftActive)
@@ -253,12 +252,12 @@ void Kernel::requestScreenshot()
 
 bool Kernel::lockLvgl(uint32_t timeout_ms)
 {
-    return board_.lockLvgl(timeout_ms);
+    return board_->lockLvgl(timeout_ms);
 }
 
 void Kernel::unlockLvgl()
 {
-    board_.unlockLvgl();
+    board_->unlockLvgl();
 }
 
 void Kernel::render()
@@ -285,21 +284,21 @@ void Kernel::render()
 
     if (screenshot_pending_) {
         screenshot_pending_ = false;
-        if (board_.beginScreenshotCapture()) {
+        if (board_->beginScreenshotCapture()) {
             lv_obj_t *screen = lv_screen_active();
             if (screen != nullptr) {
                 lv_obj_invalidate(screen);
             }
             lv_refr_now(nullptr);
-            board_.emitScreenshot();
-            board_.endScreenshotCapture();
+            board_->emitScreenshot();
+            board_->endScreenshotCapture();
         }
     }
 }
 
 void Kernel::pumpLvgl()
 {
-    if (board_.usesExternalLvglPort()) {
+    if (board_->usesExternalLvglPort()) {
         return;
     }
 
@@ -327,7 +326,7 @@ void Kernel::ensureAppMenu()
         return;
     }
 
-    const bool touch = board_.hasTouchInput();
+    const bool touch = board_->hasTouchInput();
     const lv_coord_t overlay_w = touch ? 540 : 230;
     const lv_coord_t overlay_h = touch ? 270 : 122;
     const lv_coord_t tile_w = touch ? 160 : 66;
@@ -455,7 +454,7 @@ void Kernel::showAppMenu(bool show)
         lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(menu_overlay_);
         menu_index_cached_ = -1;
-        if (board_.hasTouchInput()) {
+        if (board_->hasTouchInput()) {
             lv_obj_set_style_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
             lv_obj_set_style_translate_y(menu_overlay_, 0, LV_PART_MAIN);
             updateAppMenu();
@@ -494,7 +493,7 @@ void Kernel::showAppMenu(bool show)
         }
     } else {
         lv_anim_delete(menu_overlay_, nullptr);
-        if (board_.hasTouchInput()) {
+        if (board_->hasTouchInput()) {
             lv_obj_add_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_style_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
             lv_obj_set_style_translate_y(menu_overlay_, 0, LV_PART_MAIN);
@@ -671,12 +670,12 @@ void Kernel::ensureStatusBar()
     }
 
     status_bar_ = lv_obj_create(screen);
-    lv_obj_set_size(status_bar_, board_.displayWidth(), board_.statusBarHeight());
+    lv_obj_set_size(status_bar_, board_->displayWidth(), board_->statusBarHeight());
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);
     ui_theme::applyPanel(status_bar_, LV_COLOR_MAKE(22, 30, 46), LV_COLOR_MAKE(22, 30, 46), 0, 4, 0, 0);
 
-    if (board_.hasTouchInput()) {
-        const lv_coord_t button_size = static_cast<lv_coord_t>(std::max(56, board_.statusBarHeight() - 8));
+    if (board_->hasTouchInput()) {
+        const lv_coord_t button_size = static_cast<lv_coord_t>(std::max(56, board_->statusBarHeight() - 8));
         const lv_coord_t gap = 4;
 
         status_launcher_btn_ = lv_button_create(status_bar_);
@@ -718,7 +717,7 @@ void Kernel::ensureStatusBar()
     status_left_ = lv_label_create(status_bar_);
     ui_theme::applyText14(status_left_);
     lv_obj_set_style_text_color(status_left_, LV_COLOR_MAKE(240, 244, 252), LV_PART_MAIN);
-    lv_obj_align(status_left_, LV_ALIGN_LEFT_MID, board_.hasTouchInput() ? 184 : 0, 0);
+    lv_obj_align(status_left_, LV_ALIGN_LEFT_MID, board_->hasTouchInput() ? 184 : 0, 0);
 
     status_center_ = lv_label_create(status_bar_);
     ui_theme::applyText14(status_center_);
@@ -844,7 +843,7 @@ void Kernel::updateStatusBar()
 void Kernel::ensureGlobalKeyboard()
 {
 #if CONFIG_XCAS_USE_SCREEN_KEYBOARD
-    if (global_keyboard_ != nullptr || !board_.hasTouchInput()) {
+    if (global_keyboard_ != nullptr || !board_->hasTouchInput()) {
         return;
     }
 
@@ -854,8 +853,8 @@ void Kernel::ensureGlobalKeyboard()
     }
 
     global_keyboard_ = lv_keyboard_create(screen);
-    const lv_coord_t keyboard_h = static_cast<lv_coord_t>(std::max(260, board_.displayHeight() / 3));
-    lv_obj_set_size(global_keyboard_, board_.displayWidth(), keyboard_h);
+    const lv_coord_t keyboard_h = static_cast<lv_coord_t>(std::max(260, board_->displayHeight() / 3));
+    lv_obj_set_size(global_keyboard_, board_->displayWidth(), keyboard_h);
     lv_obj_align(global_keyboard_, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_style_text_font(global_keyboard_, ui_theme::textFont16(), LV_PART_ITEMS);
     lv_obj_add_event_cb(global_keyboard_, &Kernel::globalKeyboardEventCb, LV_EVENT_READY, this);
@@ -895,7 +894,7 @@ lv_obj_t *Kernel::findFocusedTextarea(lv_obj_t *root) const
 void Kernel::updateGlobalKeyboardBinding()
 {
 #if CONFIG_XCAS_USE_SCREEN_KEYBOARD
-    if (!board_.hasTouchInput() || isCalcRoute(router_.current())) {
+    if (!board_->hasTouchInput() || isCalcRoute(router_.current())) {
         return;
     }
 
@@ -1067,7 +1066,7 @@ void Kernel::globalKeyboardEventCb(lv_event_t *e)
 
 void Kernel::drawBootSplash()
 {
-    if (board_.usesExternalLvglPort()) {
+    if (board_->usesExternalLvglPort()) {
         lv_obj_t *screen = lv_screen_active();
         if (screen != nullptr) {
             ui_theme::applyPage(screen, LV_COLOR_MAKE(20, 20, 20));
@@ -1076,18 +1075,18 @@ void Kernel::drawBootSplash()
         return;
     }
 
-    std::vector<uint16_t> line(static_cast<size_t>(board_.displayWidth()));
-    for (int y = 0; y < board_.displayHeight(); ++y) {
+    std::vector<uint16_t> line(static_cast<size_t>(board_->displayWidth()));
+    for (int y = 0; y < board_->displayHeight(); ++y) {
         uint16_t color = rgb565(20, 20, 20);
-        if (y < board_.displayHeight() / 3) {
+        if (y < board_->displayHeight() / 3) {
             color = rgb565(220, 40, 40);
-        } else if (y < (board_.displayHeight() * 2) / 3) {
+        } else if (y < (board_->displayHeight() * 2) / 3) {
             color = rgb565(40, 190, 70);
         } else {
             color = rgb565(40, 110, 220);
         }
         std::fill(line.begin(), line.end(), color);
-        board_.presentArea(0, y, board_.displayWidth(), y + 1, line.data());
+        board_->presentArea(0, y, board_->displayWidth(), y + 1, line.data());
     }
     ESP_LOGI(kTag, "boot splash rendered");
 }

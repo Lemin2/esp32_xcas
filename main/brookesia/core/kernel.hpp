@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "lvgl.h"
+#include "cardputer_bsp/cardputer_bsp.hpp"
 
 #include "brookesia/core/app.hpp"
 #include "brookesia/core/router.hpp"
@@ -62,7 +63,7 @@ private:
 
     static constexpr size_t kRouteCount = 5;
 
-    board::CardputerBsp board_;
+    std::unique_ptr<board::IBsp> board_;
     xcas::XcasService casService_;
     ServiceHub services_;
     Router router_;

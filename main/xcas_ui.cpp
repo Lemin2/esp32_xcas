@@ -440,7 +440,7 @@ namespace xcas
 
     } // namespace
 
-    XcasUi::XcasUi(board::CardputerBsp &board, XcasService &service)
+    XcasUi::XcasUi(board::IBsp &board, XcasService &service)
         : board_(board),
           service_(service),
           lv_display_(nullptr),

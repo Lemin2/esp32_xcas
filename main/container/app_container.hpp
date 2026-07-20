@@ -20,7 +20,7 @@ public:
 private:
     void drawBootSplash();
 
-    board::CardputerBsp board_;
+    std::unique_ptr<board::IBsp> board_;
     xcas::XcasService casService_;
     ServiceBus services_;
     Router router_;

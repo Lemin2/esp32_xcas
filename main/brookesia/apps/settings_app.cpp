@@ -32,7 +32,7 @@
 #endif
 #endif
 
-#include "cardputer_bsp.hpp"
+#include "cardputer_bsp/cardputer_bsp.hpp"
 
 #include "brookesia/apps/fs_util.hpp"
 #include "brookesia/core/app_settings.hpp"

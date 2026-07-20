@@ -7,7 +7,7 @@
 
 #include "lvgl.h"
 
-#include "cardputer_bsp.hpp"
+#include "cardputer_bsp/cardputer_bsp.hpp"
 #include "mathlayout/paint/math_painter.hpp"
 #include "xcas_service.hpp"
 
@@ -17,7 +17,7 @@ namespace xcas
     class XcasUi
     {
     public:
-        XcasUi(board::CardputerBsp &board, XcasService &service);
+        XcasUi(board::IBsp &board, XcasService &service);
 
         void enqueueInputKey(uint32_t key);
         void render();
@@ -77,10 +77,10 @@ namespace xcas
         lv_coord_t screenKeyboardBottomReserved() const;
         void updateScreenKeyboardLayout();
 
-        board::CardputerBsp &board_;
+        board::IBsp &board_;
         XcasService &service_;
 
-        std::array<uint16_t, board::CardputerBsp::kDisplayWidth * 20> lv_draw_pixels_{};
+        std::array<uint16_t, board::IBsp::kDisplayWidth * 20> lv_draw_pixels_{};
 
         lv_display_t *lv_display_;
         lv_indev_t *keyboard_indev_;

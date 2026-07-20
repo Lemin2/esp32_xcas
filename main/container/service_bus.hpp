@@ -1,18 +1,18 @@
 #pragma once
 
-#include "cardputer_bsp.hpp"
+#include "cardputer_bsp/cardputer_bsp.hpp"
 #include "xcas_service.hpp"
 
 namespace container {
 
 class ServiceBus {
 public:
-    ServiceBus(board::CardputerBsp &board, xcas::XcasService &casService)
+    ServiceBus(board::IBsp &board, xcas::XcasService &casService)
         : board_(board), casService_(casService)
     {
     }
 
-    board::CardputerBsp &board()
+    board::IBsp &board()
     {
         return board_;
     }
@@ -23,7 +23,7 @@ public:
     }
 
 private:
-    board::CardputerBsp &board_;
+    board::IBsp &board_;
     xcas::XcasService &casService_;
 };
 

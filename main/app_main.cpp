@@ -17,7 +17,6 @@
 #include "sdkconfig.h"
 #include "brookesia/core/kernel.hpp"
 #include "xcas_service.hpp"
-#include "cardputer_bsp.hpp"
 #include "mathlayout/render/text_renderer.hpp"
 
 namespace {
@@ -109,12 +108,13 @@ void initializeAutomationStdio()
         .source_clk = UART_SCLK_XTAL,
 #endif
     };
-    const esp_err_t install_err = uart_driver_install(CONFIG_ESP_CONSOLE_UART_NUM, 256, 0, 0, nullptr, 0);
+    const uart_port_t uart_port = static_cast<uart_port_t>(CONFIG_ESP_CONSOLE_UART_NUM);
+    const esp_err_t install_err = uart_driver_install(uart_port, 256, 0, 0, nullptr, 0);
     if (install_err != ESP_OK && install_err != ESP_ERR_INVALID_STATE) {
         ESP_LOGW(kTag, "uart console driver install failed: %s", esp_err_to_name(install_err));
     }
-    ESP_ERROR_CHECK(uart_param_config(CONFIG_ESP_CONSOLE_UART_NUM, &uart_config));
-    uart_vfs_dev_use_driver(CONFIG_ESP_CONSOLE_UART_NUM);
+    ESP_ERROR_CHECK(uart_param_config(uart_port, &uart_config));
+    uart_vfs_dev_use_driver(uart_port);
     ESP_LOGI(kTag, "automation console on UART%d @ %d", CONFIG_ESP_CONSOLE_UART_NUM, CONFIG_ESP_CONSOLE_UART_BAUDRATE);
 #endif
 

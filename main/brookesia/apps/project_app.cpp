@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 #include <sys/unistd.h>
 
-#include "cardputer_bsp.hpp"
+#include "cardputer_bsp/cardputer_bsp.hpp"
 
 #include "brookesia/apps/fs_util.hpp"
 #include "brookesia/core/ui_theme.hpp"

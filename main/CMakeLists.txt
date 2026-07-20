@@ -1,7 +1,6 @@
 set(XCAS_GUI_SRCS
     "app_main.cpp"
     "xcas_service.cpp"
-    "cardputer_bsp.cpp"
     "xcas_ui.cpp"
     "mathlayout/font/font_metrics_lvgl.cpp"
     "mathlayout/layout/layout_engine.cpp"
@@ -79,6 +78,8 @@ if(XCAS_ENABLE_CONSOLE_MAIN)
          cmd_wifi
          cmd_nvs)
 endif()
+
+list(APPEND XCAS_PRIV_REQUIRES cardputer_bsp)
 
 idf_component_register(SRCS ${XCAS_SRCS}
                        PRIV_REQUIRES ${XCAS_PRIV_REQUIRES}
