@@ -52,14 +52,8 @@ void PlaceholderApp::releaseUi()
     ui_ready_ = false;
 }
 
-void PlaceholderApp::handleKeyboardState(uint64_t pressedMask)
-{
-    last_mask_ = pressedMask;
-}
-
 void PlaceholderApp::render()
 {
-    (void)last_mask_;
 }
 
 void PlaceholderApp::ensureUi()

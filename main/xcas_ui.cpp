@@ -13,8 +13,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
+#include "sdkconfig.h"
 
 #include "brookesia/apps/fs_util.hpp"
+#include "brookesia/core/app_settings.hpp"
 #include "brookesia/core/ui_theme.hpp"
 #include "mathlayout/paint/math_painter.hpp"
 
@@ -24,91 +26,44 @@ namespace xcas
 {
     namespace
     {
-        // ── Autocomplete word list ─────────────────────────────────────────────
-        static const char *const kAcWords[] = {
-            "abs","acos","acosh","asin","asinh","atan","atanh",
-            "ceil","conj","cos","cosh","cross",
-            "denom","det","diff","evalf","exp","factor","floor",
-            "gcd","imag","int","irem","lcm","ln","log","max","min",
-            "mod","normal","numer","pi","product",
-            "re","round","seq","sign","simplify",
-            "sin","sinh","solve","sqrt","subst","sum",
-            "tan","tanh","zeros",
-            nullptr
-        };
-
-        constexpr xcas::XcasUi::KeyLabel kKeyMap[xcas::XcasUi::kKeyRowCount][xcas::XcasUi::kKeyColCount] = {
-            {
-                {"`", "~"},
-                {"1", "!"},
-                {"2", "@"},
-                {"3", "#"},
-                {"4", "$"},
-                {"5", "%"},
-                {"6", "^"},
-                {"7", "&"},
-                {"8", "*"},
-                {"9", "("},
-                {"0", ")"},
-                {"-", "_"},
-                {"=", "+"},
-                {"Backspace", "Backspace"},
-            },
-            {
-                {"Tab", "Tab"},
-                {"q", "Q"},
-                {"w", "W"},
-                {"e", "E"},
-                {"r", "R"},
-                {"t", "T"},
-                {"y", "Y"},
-                {"u", "U"},
-                {"i", "I"},
-                {"o", "O"},
-                {"p", "P"},
-                {"[", "{"},
-                {"]", "}"},
-                {"\\", "|"},
-            },
-            {
-                {"Fn", "Fn"},
-                {"Shift", "Shift"},
-                {"a", "A"},
-                {"s", "S"},
-                {"d", "D"},
-                {"f", "F"},
-                {"g", "G"},
-                {"h", "H"},
-                {"j", "J"},
-                {"k", "K"},
-                {"l", "L"},
-                {";", ":"},
-                {"'", "\""},
-                {"Enter", "Enter"},
-            },
-            {
-                {"Ctrl", "Ctrl"},
-                {"Opt", "Opt"},
-                {"Alt", "Alt"},
-                {"z", "Z"},
-                {"x", "X"},
-                {"c", "C"},
-                {"v", "V"},
-                {"b", "B"},
-                {"n", "N"},
-                {"m", "M"},
-                {",", "<"},
-                {".", ">"},
-                {"/", "?"},
-                {"Space", "Space"},
-            },
-        };
-
         constexpr lv_color_t kBgColor = LV_COLOR_MAKE(245, 245, 238);
         constexpr lv_color_t kPanelColor = LV_COLOR_MAKE(255, 255, 255);
         constexpr lv_color_t kTextColor = LV_COLOR_MAKE(16, 24, 36);
         constexpr lv_color_t kStatusColor = LV_COLOR_MAKE(88, 104, 122);
         constexpr lv_color_t kAccentColor = LV_COLOR_MAKE(24, 84, 192);
+    #if defined(CONFIG_XCAS_BOARD_TAB5) && CONFIG_XCAS_BOARD_TAB5
+        constexpr bool kBoardTab5 = true;
+    #else
+        constexpr bool kBoardTab5 = false;
+    #endif
+
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        static const char *const kMathFuncKeyboardMap[] = {
+            "sin(", "cos(", "tan(", "sqrt(", LV_SYMBOL_BACKSPACE, "\n",
+            "asin(", "acos(", "atan(", "root(", "^", "\n",
+            "log(", "ln(", "exp(", "abs(", "pi", "e", "\n",
+            "diff(", "int(", "limit(", "sum(", LV_SYMBOL_OK, "",};
+
+        static const char *const kMathSymbolKeyboardMap[] = {
+            "solve(", "subst(", "factor(", "simplify(", LV_SYMBOL_BACKSPACE, "\n",
+            "expand(", "normal(", "det(", "matrix(", "seq(", "\n",
+            "plot(", "[", "]", "(", ")", "\n",
+            "x", "y", "n", ",", ";", "=", LV_SYMBOL_OK, "",};
+
+        static const char *const kMathNumberKeyboardMap[] = {
+            "7", "8", "9", LV_SYMBOL_BACKSPACE, "\n",
+            "4", "5", "6", "/", "\n",
+            "1", "2", "3", "*", "\n",
+            "0", ".", "+", "-", LV_SYMBOL_OK, "",};
+
+        static const lv_buttonmatrix_ctrl_t kMathKeyboardCtrl[] = {
+            LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1,
+            LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1,
+            LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1,
+            LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1,
+            LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1, LV_BUTTONMATRIX_CTRL_WIDTH_1,
+        };
+#endif
 
         size_t emitRgb565ImageBase64Chunk(const uint8_t *bytes, size_t total, size_t offset, int max_lines)
         {
@@ -215,9 +170,117 @@ namespace xcas
             }
         }
 
+        uint32_t decodeGlyphCodepoint(const std::string &text)
+        {
+            if (text.empty()) {
+                return 0;
+            }
+            const auto b0 = static_cast<uint8_t>(text[0]);
+            if (b0 < 0x80U) {
+                return b0;
+            }
+            if ((b0 & 0xE0U) == 0xC0U && text.size() >= 2) {
+                const auto b1 = static_cast<uint8_t>(text[1]);
+                return ((b0 & 0x1FU) << 6) | (b1 & 0x3FU);
+            }
+            if ((b0 & 0xF0U) == 0xE0U && text.size() >= 3) {
+                const auto b1 = static_cast<uint8_t>(text[1]);
+                const auto b2 = static_cast<uint8_t>(text[2]);
+                return ((b0 & 0x0FU) << 12) | ((b1 & 0x3FU) << 6) | (b2 & 0x3FU);
+            }
+            if ((b0 & 0xF8U) == 0xF0U && text.size() >= 4) {
+                const auto b1 = static_cast<uint8_t>(text[1]);
+                const auto b2 = static_cast<uint8_t>(text[2]);
+                const auto b3 = static_cast<uint8_t>(text[3]);
+                return ((b0 & 0x07U) << 18) | ((b1 & 0x3FU) << 12) | ((b2 & 0x3FU) << 6) | (b3 & 0x3FU);
+            }
+            return 0;
+        }
+
+        void drawGlyphRgb565(std::vector<uint16_t> &pixels,
+                             int width,
+                             int height,
+                             const lv_font_t *font,
+                             const xcas::mathlayout::DrawGlyphCommand &glyph,
+                             uint16_t color)
+        {
+            if (font == nullptr || glyph.text.empty()) {
+                return;
+            }
+
+            const uint32_t cp = decodeGlyphCodepoint(glyph.text);
+            if (cp == 0) {
+                return;
+            }
+
+            lv_font_glyph_dsc_t dsc{};
+            if (!lv_font_get_glyph_dsc(font, &dsc, cp, 0) || dsc.box_w == 0 || dsc.box_h == 0) {
+                return;
+            }
+
+            lv_draw_buf_t *dynamic_bitmap = nullptr;
+            const auto *bitmap = static_cast<const uint8_t *>(lv_font_get_glyph_static_bitmap(&dsc));
+            int stride = dsc.stride != 0 ? static_cast<int>(dsc.stride) : static_cast<int>((dsc.box_w + 7U) / 8U);
+            bool bitmap_is_a8 = dsc.format == LV_FONT_GLYPH_FORMAT_A8;
+            if (bitmap == nullptr) {
+                dynamic_bitmap = lv_draw_buf_create(dsc.box_w, dsc.box_h, LV_COLOR_FORMAT_A8, 0);
+                if (dynamic_bitmap != nullptr) {
+                    const auto *glyph_data = static_cast<const lv_draw_buf_t *>(lv_font_get_glyph_bitmap(&dsc, dynamic_bitmap));
+                    if (glyph_data != nullptr) {
+                        bitmap = glyph_data->data;
+                        stride = static_cast<int>(glyph_data->header.stride);
+                        bitmap_is_a8 = true;
+                    }
+                }
+            }
+            if (bitmap == nullptr) {
+                if (dynamic_bitmap != nullptr) {
+                    lv_draw_buf_destroy(dynamic_bitmap);
+                }
+                lv_font_glyph_release_draw_data(&dsc);
+                return;
+            }
+
+            const int baseline_from_top = static_cast<int>(font->line_height) - static_cast<int>(font->base_line);
+            const int x0 = glyph.x + static_cast<int>(dsc.ofs_x);
+            const int y0 = glyph.y + baseline_from_top - static_cast<int>(dsc.box_h) - static_cast<int>(dsc.ofs_y);
+
+            for (int yy = 0; yy < static_cast<int>(dsc.box_h); ++yy) {
+                for (int xx = 0; xx < static_cast<int>(dsc.box_w); ++xx) {
+                    const size_t row = static_cast<size_t>(yy) * static_cast<size_t>(stride);
+                    uint8_t alpha = 0;
+                    if (bitmap_is_a8) {
+                        alpha = bitmap[row + static_cast<size_t>(xx)];
+                    } else if (dsc.format == LV_FONT_GLYPH_FORMAT_A4) {
+                        const uint8_t packed = bitmap[row + static_cast<size_t>(xx / 2)];
+                        alpha = (xx & 1) ? static_cast<uint8_t>((packed & 0x0FU) * 17U)
+                                         : static_cast<uint8_t>(((packed >> 4) & 0x0FU) * 17U);
+                    } else if (dsc.format == LV_FONT_GLYPH_FORMAT_A2) {
+                        const uint8_t packed = bitmap[row + static_cast<size_t>(xx / 4)];
+                        const int shift = 6 - ((xx & 3) * 2);
+                        alpha = static_cast<uint8_t>(((packed >> shift) & 0x03U) * 85U);
+                    } else if (dsc.format == LV_FONT_GLYPH_FORMAT_A1) {
+                        const uint8_t packed = bitmap[row + static_cast<size_t>(xx / 8)];
+                        alpha = (packed & (0x80U >> (xx & 7))) ? 255 : 0;
+                    }
+                    if (alpha > 24) {
+                        putPixel(pixels, width, height, x0 + xx, y0 + yy, color);
+                    }
+                }
+            }
+
+            if (dynamic_bitmap != nullptr) {
+                lv_draw_buf_destroy(dynamic_bitmap);
+            }
+            lv_font_glyph_release_draw_data(&dsc);
+        }
+
         std::vector<uint16_t> rasterizeDrawListRgb565(const xcas::mathlayout::DrawList &draw_list,
                                                        int width,
                                                        int height,
+                                                       const lv_font_t *font,
+                                                       int offset_x,
+                                                       int offset_y,
                                                        lv_color_t text_color,
                                                        lv_color_t bg_color)
         {
@@ -230,10 +293,10 @@ namespace xcas
                     drawLineRgb565(pixels,
                                    width,
                                    height,
-                                   line->x1,
-                                   line->y1,
-                                   line->x2,
-                                   line->y2,
+                                   line->x1 + offset_x,
+                                   line->y1 + offset_y,
+                                   line->x2 + offset_x,
+                                   line->y2 + offset_y,
                                    std::max(1, line->width),
                                    fg);
                     continue;
@@ -241,19 +304,21 @@ namespace xcas
 
                 if (const auto *rect = std::get_if<xcas::mathlayout::DrawRectCommand>(&command)) {
                     if (rect->filled) {
-                        fillRectRgb565(pixels, width, height, rect->x, rect->y, rect->width, rect->height, fg);
+                        fillRectRgb565(pixels, width, height, rect->x + offset_x, rect->y + offset_y, rect->width, rect->height, fg);
                     } else {
-                        drawLineRgb565(pixels, width, height, rect->x, rect->y, rect->x + rect->width - 1, rect->y, 1, fg);
-                        drawLineRgb565(pixels, width, height, rect->x, rect->y, rect->x, rect->y + rect->height - 1, 1, fg);
-                        drawLineRgb565(pixels, width, height, rect->x + rect->width - 1, rect->y, rect->x + rect->width - 1, rect->y + rect->height - 1, 1, fg);
-                        drawLineRgb565(pixels, width, height, rect->x, rect->y + rect->height - 1, rect->x + rect->width - 1, rect->y + rect->height - 1, 1, fg);
+                        drawLineRgb565(pixels, width, height, rect->x + offset_x, rect->y + offset_y, rect->x + rect->width - 1 + offset_x, rect->y + offset_y, 1, fg);
+                        drawLineRgb565(pixels, width, height, rect->x + offset_x, rect->y + offset_y, rect->x + offset_x, rect->y + rect->height - 1 + offset_y, 1, fg);
+                        drawLineRgb565(pixels, width, height, rect->x + rect->width - 1 + offset_x, rect->y + offset_y, rect->x + rect->width - 1 + offset_x, rect->y + rect->height - 1 + offset_y, 1, fg);
+                        drawLineRgb565(pixels, width, height, rect->x + offset_x, rect->y + rect->height - 1 + offset_y, rect->x + rect->width - 1 + offset_x, rect->y + rect->height - 1 + offset_y, 1, fg);
                     }
                     continue;
                 }
 
                 if (const auto *glyph = std::get_if<xcas::mathlayout::DrawGlyphCommand>(&command)) {
-                    // Glyph proxy: avoid LVGL draw-label path during debug shot export.
-                    fillRectRgb565(pixels, width, height, glyph->x + 1, glyph->y + 2, 3, 5, fg);
+                    xcas::mathlayout::DrawGlyphCommand shifted = *glyph;
+                    shifted.x += offset_x;
+                    shifted.y += offset_y;
+                    drawGlyphRgb565(pixels, width, height, font, shifted, fg);
                 }
             }
 
@@ -390,39 +455,18 @@ namespace xcas
           editor_preview_host_(nullptr),
           editor_preview_formula_(nullptr),
           editor_preview_label_(nullptr),
+          editor_preview_back_btn_(nullptr),
           editor_hint_label_(nullptr),
           input_box_(nullptr),
-          ac_hint_label_(nullptr),
+          screen_keyboard_(nullptr),
+          keyboard_mode_bar_(nullptr),
           root_(nullptr),
           selected_history_index_(-1),
-          previous_key_mask_(0),
           last_render_us_(0),
           lvgl_initialized_(false),
           redraw_recovery_pending_(false),
-          fn_toggled_(false),
-          caps_toggled_(false),
           subjects_initialized_(false)
     {
-    }
-
-    int XcasUi::keyIndex(int row, int col)
-    {
-        return row * kKeyColCount + col;
-    }
-
-    const XcasUi::KeyLabel &XcasUi::keyAt(int row, int col)
-    {
-        return kKeyMap[row][col];
-    }
-
-    bool XcasUi::keyIsDown(uint64_t mask, int row, int col)
-    {
-        return (mask & (1ULL << keyIndex(row, col))) != 0U;
-    }
-
-    bool XcasUi::keyIs(const KeyLabel &key, const char *name)
-    {
-        return std::strcmp(key.base, name) == 0;
     }
 
     void XcasUi::lvglFlush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
@@ -491,7 +535,21 @@ namespace xcas
         const intptr_t idx_tag = reinterpret_cast<intptr_t>(lv_obj_get_user_data(row));
         const int index = static_cast<int>(idx_tag);
         self->selectHistoryIndex(index, false);
-        self->setStatusText("History browse");
+        if (lv_event_get_code(e) == LV_EVENT_DOUBLE_CLICKED) {
+            self->openHistoryFullscreenPreview();
+        } else {
+            self->setStatusText("History browse");
+        }
+    }
+
+    void XcasUi::onPreviewBackEvent(lv_event_t *e)
+    {
+        auto *self = static_cast<XcasUi *>(lv_event_get_user_data(e));
+        if (self == nullptr || lv_event_get_code(e) != LV_EVENT_CLICKED) {
+            return;
+        }
+        self->closeHistoryFullscreenPreview();
+        self->setStatusText("Preview closed");
     }
 
     void XcasUi::lvglKeyboardRead(lv_indev_t *indev, lv_indev_data_t *data)
@@ -543,6 +601,13 @@ namespace xcas
 
         const lv_event_code_t code = lv_event_get_code(e);
 
+        if (code == LV_EVENT_FOCUSED || code == LV_EVENT_PRESSED || code == LV_EVENT_CLICKED) {
+            if (self->board_.hasTouchInput()) {
+                self->setScreenKeyboardVisible(true);
+            }
+            return;
+        }
+
         if (code == LV_EVENT_READY) {
             if (self->selected_history_index_ >= 0) {
                 self->selectHistoryIndex(self->selected_history_index_, true);
@@ -555,7 +620,6 @@ namespace xcas
         }
 
         if (code == LV_EVENT_VALUE_CHANGED) {
-            self->updateAutocomplete();
             return;
         }
 
@@ -581,11 +645,6 @@ namespace xcas
             return;
         }
         if (key == '\t') {
-            if (self->ac_candidates_.empty()) {
-                self->updateAutocomplete();
-            } else {
-                self->applyAutocomplete();
-            }
             lv_event_stop_processing(e);
             return;
         }
@@ -594,7 +653,6 @@ namespace xcas
             if (self->input_box_ != nullptr) {
                 lv_textarea_set_text(self->input_box_, "");
             }
-            self->hideAutocomplete();
             self->updateHeaderText();
             self->setStatusText("Esc");
             lv_event_stop_processing(e);
@@ -605,7 +663,6 @@ namespace xcas
             if (self->input_box_ != nullptr) {
                 lv_textarea_delete_char_forward(self->input_box_);
             }
-            self->hideAutocomplete();
             self->updateHeaderText();
             self->setStatusText("Del");
             lv_event_stop_processing(e);
@@ -613,6 +670,52 @@ namespace xcas
         }
 
         self->clearHistorySelection();
+    }
+
+    void XcasUi::onKeyboardModeEvent(lv_event_t *e)
+    {
+        if (e == nullptr || lv_event_get_code(e) != LV_EVENT_VALUE_CHANGED) {
+            return;
+        }
+
+        auto *self = static_cast<XcasUi *>(lv_event_get_user_data(e));
+        if (self == nullptr) {
+            return;
+        }
+
+        auto *matrix = static_cast<lv_obj_t *>(lv_event_get_target(e));
+        const uint32_t id = lv_buttonmatrix_get_selected_button(matrix);
+        const char *text = lv_buttonmatrix_get_button_text(matrix, id);
+        if (text == nullptr || std::strcmp(text, "ABC") == 0) {
+            self->setScreenKeyboardMathMode(false);
+        } else if (std::strcmp(text, "Func") == 0) {
+            self->setScreenKeyboardMathPage(0);
+        } else if (std::strcmp(text, "Sym") == 0) {
+            self->setScreenKeyboardMathPage(1);
+        } else if (std::strcmp(text, "123") == 0) {
+            self->setScreenKeyboardMathPage(2);
+        }
+    }
+
+    void XcasUi::onScreenKeyboardEvent(lv_event_t *e)
+    {
+        if (e == nullptr) {
+            return;
+        }
+
+        auto *self = static_cast<XcasUi *>(lv_event_get_user_data(e));
+        if (self == nullptr) {
+            return;
+        }
+
+        const lv_event_code_t code = lv_event_get_code(e);
+        if (code == LV_EVENT_READY) {
+            self->submitInput();
+            return;
+        }
+        if (code == LV_EVENT_CANCEL) {
+            self->setScreenKeyboardVisible(false);
+        }
     }
 
     void XcasUi::initializeLvgl()
@@ -623,28 +726,34 @@ namespace xcas
         }
 
         if (lv_display_ == nullptr) {
-            lv_init();
+            if (board_.usesExternalLvglPort()) {
+                lv_display_ = lv_display_get_default();
+            } else {
+                lv_init();
 
-            lv_display_ = lv_display_create(board::CardputerBsp::kDisplayWidth, board::CardputerBsp::kDisplayHeight);
-            lv_display_set_color_format(lv_display_, LV_COLOR_FORMAT_RGB565);
-            lv_display_set_buffers(
-                lv_display_,
-                lv_draw_pixels_.data(),
-                nullptr,
-                static_cast<uint32_t>(lv_draw_pixels_.size() * sizeof(lv_draw_pixels_[0])),
-                LV_DISPLAY_RENDER_MODE_PARTIAL);
-            lv_display_set_flush_cb(lv_display_, &XcasUi::lvglFlush);
-            lv_display_set_user_data(lv_display_, this);
-            lv_display_set_default(lv_display_);
+                lv_display_ = lv_display_create(board_.displayWidth(), board_.displayHeight());
+                lv_display_set_color_format(lv_display_, LV_COLOR_FORMAT_RGB565);
+                lv_display_set_buffers(
+                    lv_display_,
+                    lv_draw_pixels_.data(),
+                    nullptr,
+                    static_cast<uint32_t>(lv_draw_pixels_.size() * sizeof(lv_draw_pixels_[0])),
+                    LV_DISPLAY_RENDER_MODE_PARTIAL);
+                lv_display_set_flush_cb(lv_display_, &XcasUi::lvglFlush);
+                lv_display_set_user_data(lv_display_, this);
+                lv_display_set_default(lv_display_);
+            }
 
-            keyboard_indev_ = lv_indev_create();
-            lv_indev_set_type(keyboard_indev_, LV_INDEV_TYPE_KEYPAD);
-            lv_indev_set_read_cb(keyboard_indev_, &XcasUi::lvglKeyboardRead);
-            lv_indev_set_user_data(keyboard_indev_, this);
+            if (board_.hasPhysicalKeyboard()) {
+                keyboard_indev_ = lv_indev_create();
+                lv_indev_set_type(keyboard_indev_, LV_INDEV_TYPE_KEYPAD);
+                lv_indev_set_read_cb(keyboard_indev_, &XcasUi::lvglKeyboardRead);
+                lv_indev_set_user_data(keyboard_indev_, this);
 
-            input_group_ = lv_group_create();
-            lv_group_set_default(input_group_);
-            lv_indev_set_group(keyboard_indev_, input_group_);
+                input_group_ = lv_group_create();
+                lv_group_set_default(input_group_);
+                lv_indev_set_group(keyboard_indev_, input_group_);
+            }
         } else if (input_group_ != nullptr) {
             lv_group_remove_all_objs(input_group_);
             lv_group_set_default(input_group_);
@@ -656,9 +765,10 @@ namespace xcas
 
     void XcasUi::buildLayout()
     {
-        const lv_coord_t screen_w = static_cast<lv_coord_t>(board::CardputerBsp::kDisplayWidth);
-        const lv_coord_t screen_h = static_cast<lv_coord_t>(board::CardputerBsp::kDisplayHeight);
-        const lv_coord_t top_reserved = 16; // global status bar space managed by kernel
+        const lv_coord_t screen_w = static_cast<lv_coord_t>(board_.displayWidth());
+        const lv_coord_t screen_h = static_cast<lv_coord_t>(board_.displayHeight());
+        const lv_coord_t top_reserved = static_cast<lv_coord_t>(board_.statusBarHeight());
+        const lv_coord_t bottom_reserved = screenKeyboardBottomReserved();
 
         lv_obj_t *screen = lv_scr_act();
         brookesia::ui_theme::applyPage(screen, kBgColor);
@@ -666,7 +776,7 @@ namespace xcas
 
         lv_obj_t *root = lv_obj_create(screen);
         lv_obj_remove_style_all(root);
-        lv_obj_set_size(root, screen_w, screen_h - top_reserved);
+        lv_obj_set_size(root, screen_w, screen_h - top_reserved - bottom_reserved);
         lv_obj_align(root, LV_ALIGN_TOP_LEFT, 0, top_reserved);
         lv_obj_set_flex_flow(root, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
@@ -724,11 +834,11 @@ namespace xcas
     #if LV_USE_OBJ_PROPERTY
         const lv_property_t input_props[] = {
             { .id = LV_PROPERTY_OBJ_W, .num = screen_w - 8 },
-                { .id = LV_PROPERTY_OBJ_H, .num = 40 },
+                { .id = LV_PROPERTY_OBJ_H, .num = screen_h >= 480 ? 56 : 40 },
         };
         lv_obj_set_properties(input_box_, input_props, sizeof(input_props) / sizeof(input_props[0]));
     #else
-            lv_obj_set_size(input_box_, screen_w - 8, 40);
+            lv_obj_set_size(input_box_, screen_w - 8, screen_h >= 480 ? 56 : 40);
     #endif
         lv_textarea_set_one_line(input_box_, true);
             lv_textarea_set_placeholder_text(input_box_, "1+1");
@@ -757,16 +867,9 @@ namespace xcas
             lv_group_focus_obj(input_box_);
         }
 
-        ac_hint_label_ = lv_label_create(input_box_);
-        brookesia::ui_theme::applyText14(ac_hint_label_);
-        lv_obj_set_style_text_color(ac_hint_label_, LV_COLOR_MAKE(165, 174, 188), LV_PART_MAIN);
-        lv_obj_set_pos(ac_hint_label_, 6, 5);
-        lv_label_set_text(ac_hint_label_, "");
-        lv_obj_add_flag(ac_hint_label_, LV_OBJ_FLAG_HIDDEN);
-
         editor_preview_host_ = lv_obj_create(screen);
         lv_obj_remove_style_all(editor_preview_host_);
-        lv_obj_set_size(editor_preview_host_, screen_w, screen_h - top_reserved);
+        lv_obj_set_size(editor_preview_host_, screen_w, screen_h - top_reserved - bottom_reserved);
         lv_obj_align(editor_preview_host_, LV_ALIGN_TOP_LEFT, 0, top_reserved);
         ui_theme::applyPage(editor_preview_host_, LV_COLOR_MAKE(8, 10, 14));
         lv_obj_add_flag(editor_preview_host_, LV_OBJ_FLAG_SCROLLABLE);
@@ -787,7 +890,49 @@ namespace xcas
         lv_label_set_long_mode(editor_preview_label_, LV_LABEL_LONG_WRAP);
         lv_obj_add_flag(editor_preview_label_, LV_OBJ_FLAG_HIDDEN);
 
+        editor_preview_back_btn_ = lv_button_create(screen);
+        lv_obj_set_size(editor_preview_back_btn_, board_.hasTouchInput() ? 112 : 58, board_.hasTouchInput() ? 46 : 24);
+        lv_obj_align(editor_preview_back_btn_, LV_ALIGN_TOP_RIGHT, -8, top_reserved + 6);
+        lv_obj_add_flag(editor_preview_back_btn_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_event_cb(editor_preview_back_btn_, &XcasUi::onPreviewBackEvent, LV_EVENT_CLICKED, this);
+        lv_obj_t *back_label = lv_label_create(editor_preview_back_btn_);
+        brookesia::ui_theme::applyText14(back_label);
+        lv_label_set_text(back_label, "Back");
+        lv_obj_center(back_label);
+
         status_label_ = nullptr;
+
+    #if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        static const char *const kKeyboardModeMap[] = {"ABC", "Func", "Sym", "123", ""};
+        keyboard_mode_bar_ = lv_buttonmatrix_create(screen);
+        lv_buttonmatrix_set_map(keyboard_mode_bar_, kKeyboardModeMap);
+        lv_obj_set_size(keyboard_mode_bar_, screen_w, 56);
+        lv_obj_align(keyboard_mode_bar_, LV_ALIGN_BOTTOM_MID, 0, -screenKeyboardHeight());
+        lv_obj_set_style_bg_color(keyboard_mode_bar_, LV_COLOR_MAKE(28, 34, 48), LV_PART_MAIN);
+        lv_obj_set_style_bg_opa(keyboard_mode_bar_, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_border_width(keyboard_mode_bar_, 0, LV_PART_MAIN);
+        lv_obj_set_style_pad_all(keyboard_mode_bar_, 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_gap(keyboard_mode_bar_, 4, LV_PART_MAIN);
+        lv_obj_set_style_radius(keyboard_mode_bar_, 0, LV_PART_MAIN);
+        lv_obj_set_style_bg_color(keyboard_mode_bar_, LV_COLOR_MAKE(245, 248, 252), LV_PART_ITEMS);
+        lv_obj_set_style_bg_opa(keyboard_mode_bar_, LV_OPA_COVER, LV_PART_ITEMS);
+        lv_obj_set_style_text_color(keyboard_mode_bar_, LV_COLOR_MAKE(16, 24, 36), LV_PART_ITEMS);
+        lv_obj_set_style_text_font(keyboard_mode_bar_, brookesia::ui_theme::textFont16(), LV_PART_ITEMS);
+        lv_obj_set_style_radius(keyboard_mode_bar_, 6, LV_PART_ITEMS);
+        lv_obj_set_style_pad_top(keyboard_mode_bar_, 8, LV_PART_ITEMS);
+        lv_obj_set_style_pad_bottom(keyboard_mode_bar_, 8, LV_PART_ITEMS);
+        lv_obj_add_event_cb(keyboard_mode_bar_, &XcasUi::onKeyboardModeEvent, LV_EVENT_VALUE_CHANGED, this);
+
+        screen_keyboard_ = lv_keyboard_create(screen);
+        lv_obj_set_size(screen_keyboard_, screen_w, screenKeyboardHeight());
+        lv_obj_align(screen_keyboard_, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_keyboard_set_textarea(screen_keyboard_, input_box_);
+        lv_obj_set_style_text_font(screen_keyboard_, brookesia::ui_theme::textFont16(), LV_PART_ITEMS);
+        lv_obj_add_event_cb(screen_keyboard_, &XcasUi::onScreenKeyboardEvent, LV_EVENT_READY, this);
+        lv_obj_add_event_cb(screen_keyboard_, &XcasUi::onScreenKeyboardEvent, LV_EVENT_CANCEL, this);
+        setScreenKeyboardMathMode(false);
+        setScreenKeyboardVisible(screen_keyboard_visible_);
+    #endif
 
         lv_style_init(&busy_style_);
         updateBusyBinding(false);
@@ -797,6 +942,130 @@ namespace xcas
         }
         refreshHistoryList();
         setEditorFullscreen(false);
+    }
+
+    void XcasUi::setScreenKeyboardMathMode(bool enabled)
+    {
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        if (screen_keyboard_ == nullptr) {
+            return;
+        }
+        screen_keyboard_math_ = enabled;
+        if (enabled) {
+            setScreenKeyboardMathPage(screen_keyboard_page_);
+        } else {
+            screen_keyboard_math_ = false;
+            lv_keyboard_set_mode(screen_keyboard_, LV_KEYBOARD_MODE_TEXT_LOWER);
+        }
+#else
+        (void)enabled;
+#endif
+    }
+
+    void XcasUi::setScreenKeyboardMathPage(int page)
+    {
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        if (screen_keyboard_ == nullptr) {
+            return;
+        }
+        screen_keyboard_math_ = true;
+        screen_keyboard_page_ = std::clamp(page, 0, 2);
+        const char *const *map = kMathFuncKeyboardMap;
+        if (screen_keyboard_page_ == 1) {
+            map = kMathSymbolKeyboardMap;
+        } else if (screen_keyboard_page_ == 2) {
+            map = kMathNumberKeyboardMap;
+        }
+        lv_keyboard_set_map(screen_keyboard_, LV_KEYBOARD_MODE_USER_1, map, kMathKeyboardCtrl);
+        lv_keyboard_set_mode(screen_keyboard_, LV_KEYBOARD_MODE_USER_1);
+#else
+        (void)page;
+#endif
+    }
+
+    lv_coord_t XcasUi::screenKeyboardHeight() const
+    {
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        return static_cast<lv_coord_t>(std::clamp(board_.displayHeight() / 3, 180, 320));
+#else
+        return 0;
+#endif
+    }
+
+    lv_coord_t XcasUi::screenKeyboardBottomReserved() const
+    {
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        return screen_keyboard_visible_ ? static_cast<lv_coord_t>(screenKeyboardHeight() + 56) : 0;
+#else
+        return 0;
+#endif
+    }
+
+    void XcasUi::updateScreenKeyboardLayout()
+    {
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        const lv_coord_t screen_w = static_cast<lv_coord_t>(board_.displayWidth());
+        const lv_coord_t screen_h = static_cast<lv_coord_t>(board_.displayHeight());
+        const lv_coord_t top_reserved = static_cast<lv_coord_t>(board_.statusBarHeight());
+        const lv_coord_t keyboard_h = screenKeyboardHeight();
+        const lv_coord_t bottom_reserved = screenKeyboardBottomReserved();
+
+        if (root_ != nullptr) {
+            lv_obj_set_size(root_, screen_w, screen_h - top_reserved - bottom_reserved);
+        }
+        if (editor_preview_host_ != nullptr) {
+            lv_obj_set_size(editor_preview_host_, screen_w, screen_h - top_reserved - bottom_reserved);
+        }
+        if (editor_preview_back_btn_ != nullptr) {
+            lv_obj_align(editor_preview_back_btn_, LV_ALIGN_TOP_RIGHT, -8, top_reserved + 6);
+        }
+        if (keyboard_mode_bar_ != nullptr) {
+            lv_obj_set_size(keyboard_mode_bar_, screen_w, 56);
+            lv_obj_align(keyboard_mode_bar_, LV_ALIGN_BOTTOM_MID, 0, -keyboard_h);
+        }
+        if (screen_keyboard_ != nullptr) {
+            lv_obj_set_size(screen_keyboard_, screen_w, keyboard_h);
+            lv_obj_align(screen_keyboard_, LV_ALIGN_BOTTOM_MID, 0, 0);
+        }
+        updateFullscreenPreviewPosition();
+#endif
+    }
+
+    void XcasUi::setScreenKeyboardVisible(bool visible)
+    {
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        screen_keyboard_visible_ = visible;
+        if (screen_keyboard_ != nullptr) {
+            if (visible) {
+                lv_obj_clear_flag(screen_keyboard_, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_move_foreground(screen_keyboard_);
+            } else {
+                lv_obj_add_flag(screen_keyboard_, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        if (keyboard_mode_bar_ != nullptr) {
+            if (visible) {
+                lv_obj_clear_flag(keyboard_mode_bar_, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_move_foreground(keyboard_mode_bar_);
+            } else {
+                lv_obj_add_flag(keyboard_mode_bar_, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        updateScreenKeyboardLayout();
+#else
+        (void)visible;
+#endif
+    }
+
+    bool XcasUi::toggleScreenKeyboard()
+    {
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        initializeLvgl();
+        setScreenKeyboardVisible(!screen_keyboard_visible_);
+        return true;
+#else
+        return false;
+#endif
     }
 
     void XcasUi::updateHeaderText()
@@ -919,38 +1188,6 @@ namespace xcas
             const int left = gap / 2;
             const int right = gap - left;
             return std::string(static_cast<size_t>(left), ' ') + s + std::string(static_cast<size_t>(right), ' ');
-        }
-
-        std::string repeatUtf8(const char *token, int count)
-        {
-            std::string out;
-            if (token == nullptr || count <= 0) {
-                return out;
-            }
-            const size_t len = std::strlen(token);
-            out.reserve(static_cast<size_t>(count) * len);
-            for (int i = 0; i < count; ++i) {
-                out += token;
-            }
-            return out;
-        }
-
-        int boxWidth(const RenderBox &box)
-        {
-            int w = 0;
-            for (const std::string &line : box.lines) {
-                w = std::max(w, static_cast<int>(line.size()));
-            }
-            return w;
-        }
-
-        void padLinesToWidth(RenderBox &box, int width)
-        {
-            for (std::string &line : box.lines) {
-                if (static_cast<int>(line.size()) < width) {
-                    line += std::string(static_cast<size_t>(width - static_cast<int>(line.size())), ' ');
-                }
-            }
         }
 
         RenderBox makeTextBox(const std::string &text)
@@ -1760,6 +1997,15 @@ namespace xcas
             }
         }
 
+        if (editor_preview_back_btn_ != nullptr) {
+            if (enabled) {
+                lv_obj_clear_flag(editor_preview_back_btn_, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_move_foreground(editor_preview_back_btn_);
+            } else {
+                lv_obj_add_flag(editor_preview_back_btn_, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+
         if (!enabled && input_group_ != nullptr && input_box_ != nullptr) {
             lv_group_focus_obj(input_box_);
         }
@@ -1812,8 +2058,8 @@ namespace xcas
         }
 
         constexpr int kTopInset = 18;
-        const int view_w = board::CardputerBsp::kDisplayWidth;
-        const int view_h = board::CardputerBsp::kDisplayHeight - 16 - kTopInset;
+        const int view_w = board_.displayWidth();
+        const int view_h = board_.displayHeight() - board_.statusBarHeight() - kTopInset;
 
         lv_obj_t *obj = preview_use_objects_ ? editor_preview_formula_ : editor_preview_label_;
         if (obj == nullptr || preview_content_w_ <= 0 || preview_content_h_ <= 0) {
@@ -1852,8 +2098,8 @@ namespace xcas
         }
 
         constexpr int kTopInset = 18;
-        const int view_w = board::CardputerBsp::kDisplayWidth;
-        const int view_h = board::CardputerBsp::kDisplayHeight - 16 - kTopInset;
+        const int view_w = board_.displayWidth();
+        const int view_h = board_.displayHeight() - board_.statusBarHeight() - kTopInset;
         if (view_w <= 0 || view_h <= 0 || preview_content_w_ <= 0 || preview_content_h_ <= 0) {
             return false;
         }
@@ -1896,7 +2142,7 @@ namespace xcas
         preview_paint_pending_ = true;
         updateFullscreenPreviewPosition();
         // First chunk: line-only, keep entry frame light.
-        stepFullscreenPreviewPaint(48, 48);
+        stepFullscreenPreviewPaint(kBoardTab5 ? 32 : 64, kBoardTab5 ? 8 : 48);
         return true;
     }
 
@@ -1925,6 +2171,10 @@ namespace xcas
 
         if (finished) {
             preview_paint_pending_ = false;
+        }
+
+        if (kBoardTab5) {
+            vTaskDelay(1);
         }
     }
 
@@ -1959,6 +2209,36 @@ namespace xcas
             lv_obj_add_flag(editor_preview_label_, LV_OBJ_FLAG_HIDDEN);
         }
 
+        auto showTextPreview = [&](const char *status) {
+            if (editor_preview_label_ == nullptr) {
+                return;
+            }
+            preview_use_objects_ = false;
+            preview_paint_pending_ = false;
+            preview_draw_list_ = {};
+            const std::string fallback = renderNatural2D(line);
+            lv_label_set_text(editor_preview_label_, fallback.c_str());
+            lv_obj_clear_flag(editor_preview_label_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_update_layout(editor_preview_label_);
+            preview_content_w_ = lv_obj_get_width(editor_preview_label_);
+            preview_content_h_ = lv_obj_get_height(editor_preview_label_);
+            if (preview_content_w_ <= 0) {
+                preview_content_w_ = board_.displayWidth();
+            }
+            if (preview_content_h_ <= 0) {
+                preview_content_h_ = 20;
+            }
+            setStatusText(status);
+            updateFullscreenPreviewPosition();
+        };
+
+        brookesia::settings::load();
+        const bool force_text_preview = brookesia::settings::get().formula_preview_mode == 1;
+        if (force_text_preview) {
+            showTextPreview("Preview text");
+            return;
+        }
+
         const lv_font_t *math_font = brookesia::ui_theme::textFont14();
         const bool bracket_matrix = isBracketMatrixLine(line);
         std::vector<std::string> candidates;
@@ -1972,8 +2252,8 @@ namespace xcas
             candidates.push_back(renderNatural2D(line));
         }
 
-        const int view_w = board::CardputerBsp::kDisplayWidth - 8;
-        const int view_h = board::CardputerBsp::kDisplayHeight - 28;
+        const int view_w = board_.displayWidth() - 8;
+        const int view_h = board_.displayHeight() - board_.statusBarHeight() - 12;
         const int max_object_area = 480000;
         std::string fail_reason = "unknown";
         int fail_w = 0;
@@ -2045,21 +2325,9 @@ namespace xcas
         }
 
         if (!preview_use_objects_) {
-            const std::string fallback = renderNatural2D(line);
-            lv_label_set_text(editor_preview_label_, fallback.c_str());
-            lv_obj_clear_flag(editor_preview_label_, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_update_layout(editor_preview_label_);
-            preview_content_w_ = lv_obj_get_width(editor_preview_label_);
-            preview_content_h_ = lv_obj_get_height(editor_preview_label_);
-            if (preview_content_w_ <= 0) {
-                preview_content_w_ = board::CardputerBsp::kDisplayWidth;
-            }
-            if (preview_content_h_ <= 0) {
-                preview_content_h_ = 20;
-            }
             char status[96];
             std::snprintf(status, sizeof(status), "Preview fallback: %s", fail_reason.c_str());
-            setStatusText(status);
+            showTextPreview(status);
             std::printf("ML_UI preview_object_fail reason=%s cand=%u w=%d h=%d area=%d\n",
                         fail_reason.c_str(),
                         static_cast<unsigned>(fail_candidate),
@@ -2133,11 +2401,17 @@ namespace xcas
             lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_set_user_data(row, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
             lv_obj_add_event_cb(row, &XcasUi::onHistoryRowEvent, LV_EVENT_CLICKED, this);
+            lv_obj_add_event_cb(row, &XcasUi::onHistoryRowEvent, LV_EVENT_DOUBLE_CLICKED, this);
 
             lv_obj_t *bubble = lv_obj_create(row);
+            lv_obj_set_user_data(bubble, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
+            lv_obj_add_flag(bubble, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_flag(bubble, LV_OBJ_FLAG_EVENT_BUBBLE);
+            lv_obj_add_event_cb(bubble, &XcasUi::onHistoryRowEvent, LV_EVENT_CLICKED, this);
+            lv_obj_add_event_cb(bubble, &XcasUi::onHistoryRowEvent, LV_EVENT_DOUBLE_CLICKED, this);
             const lv_coord_t bubble_max_w = is_math_output
-                ? static_cast<lv_coord_t>(board::CardputerBsp::kDisplayWidth * 96 / 100)
-                : static_cast<lv_coord_t>(board::CardputerBsp::kDisplayWidth * 82 / 100);
+                ? static_cast<lv_coord_t>(board_.displayWidth() * 96 / 100)
+                : static_cast<lv_coord_t>(board_.displayWidth() * 82 / 100);
             lv_obj_set_width(bubble, LV_SIZE_CONTENT);
             lv_obj_set_height(bubble, LV_SIZE_CONTENT);
             lv_obj_set_style_max_width(bubble, bubble_max_w, LV_PART_MAIN);
@@ -2145,10 +2419,11 @@ namespace xcas
             lv_obj_set_style_radius(bubble, 6, LV_PART_MAIN);
             lv_obj_set_style_bg_opa(bubble, LV_OPA_COVER, LV_PART_MAIN);
             lv_obj_set_style_border_width(bubble, 0, LV_PART_MAIN);
-            lv_obj_set_style_pad_left(bubble, 6, LV_PART_MAIN);
-            lv_obj_set_style_pad_right(bubble, 6, LV_PART_MAIN);
-            lv_obj_set_style_pad_top(bubble, 2, LV_PART_MAIN);
-            lv_obj_set_style_pad_bottom(bubble, 2, LV_PART_MAIN);
+            const bool touch = board_.hasTouchInput();
+            lv_obj_set_style_pad_left(bubble, touch ? 16 : 6, LV_PART_MAIN);
+            lv_obj_set_style_pad_right(bubble, touch ? 16 : 6, LV_PART_MAIN);
+            lv_obj_set_style_pad_top(bubble, touch ? 10 : 2, LV_PART_MAIN);
+            lv_obj_set_style_pad_bottom(bubble, touch ? 10 : 2, LV_PART_MAIN);
             lv_obj_set_layout(bubble, LV_LAYOUT_FLEX);
             lv_obj_set_flex_flow(bubble, LV_FLEX_FLOW_COLUMN);
             lv_obj_set_flex_align(bubble, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
@@ -2176,6 +2451,7 @@ namespace xcas
             bool used_formula_objects = false;
             const bool allow_formula_objects =
                 is_math_output &&
+                !kBoardTab5 &&
                 !history_heavy_mode &&
                 (i == newest_index || is_selected);
             if (allow_formula_objects) {
@@ -2211,7 +2487,7 @@ namespace xcas
                     object_source = std::move(wrapped);
                 }
 
-                const lv_coord_t bubble_inner_max_w = bubble_max_w - 12;
+                const lv_coord_t bubble_inner_max_w = bubble_max_w - (touch ? 32 : 12);
                 const int max_object_area = 24000;
                 const size_t max_object_source_len = 256;
                 const size_t max_object_commands = 768;
@@ -2269,7 +2545,7 @@ namespace xcas
 
             if (!used_formula_objects) {
                 lv_obj_t *label = lv_label_create(bubble);
-                lv_obj_set_style_max_width(label, bubble_max_w - 12, LV_PART_MAIN);
+                lv_obj_set_style_max_width(label, bubble_max_w - (touch ? 32 : 12), LV_PART_MAIN);
                 lv_obj_set_width(label, LV_SIZE_CONTENT);
                 lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
                 brookesia::ui_theme::applyText14(label);
@@ -2381,7 +2657,6 @@ namespace xcas
         clearHistorySelection();
         lv_textarea_set_text(input_box_, "");
         refreshEditorPreview();
-        hideAutocomplete();
         updateHeaderText();
         setStatusText("Calculating...");
         updateBusyBinding(true);
@@ -2412,15 +2687,21 @@ namespace xcas
             return;
         }
 
-        // Keep debug export bounded so a single complex expression cannot
-        // monopolize the UI task and trip the idle watchdog.
-        draw_list.width = std::min(draw_list.width, board::CardputerBsp::kDisplayWidth);
-        draw_list.height = std::min(draw_list.height, board::CardputerBsp::kDisplayHeight);
+        // Keep debug export bounded but allow images larger than the physical
+        // viewport so complex formula captures are not clipped to the screen.
+        constexpr int kMaxDebugFormulaShotW = 1600;
+        constexpr int kMaxDebugFormulaShotH = 1200;
+        constexpr int kDebugFormulaShotPad = 12;
+        const int shot_w = std::min(draw_list.width + kDebugFormulaShotPad * 2, kMaxDebugFormulaShotW);
+        const int shot_h = std::min(draw_list.height + kDebugFormulaShotPad * 2, kMaxDebugFormulaShotH);
 
         std::vector<uint16_t> pixels = rasterizeDrawListRgb565(
             draw_list,
-            draw_list.width,
-            draw_list.height,
+            shot_w,
+            shot_h,
+            font,
+            kDebugFormulaShotPad,
+            kDebugFormulaShotPad,
             kTextColor,
             LV_COLOR_MAKE(255, 255, 255));
         if (pixels.empty()) {
@@ -2428,7 +2709,7 @@ namespace xcas
             return;
         }
 
-        queueFormulaShot(std::move(pixels), draw_list.width, draw_list.height);
+        queueFormulaShot(std::move(pixels), shot_w, shot_h);
     }
 
     void XcasUi::queueFormulaShot(std::vector<uint16_t> &&pixels, int width, int height)
@@ -2478,12 +2759,6 @@ namespace xcas
     void XcasUi::processPendingFormulaShot()
     {
         // Formula shot streaming is handled by a dedicated task.
-    }
-
-    void XcasUi::handleKeyboardState(uint64_t pressed_mask)
-    {
-        initializeLvgl();
-        previous_key_mask_ = pressed_mask;
     }
 
     void XcasUi::enqueueInputKey(uint32_t key)
@@ -2558,7 +2833,7 @@ namespace xcas
         initializeLvgl();
 
         if (editor_fullscreen_ && preview_use_objects_ && preview_paint_pending_) {
-            stepFullscreenPreviewPaint(96, 48);
+            stepFullscreenPreviewPaint(kBoardTab5 ? 32 : 96, kBoardTab5 ? 8 : 48);
         }
 
         std::string result;
@@ -2601,6 +2876,9 @@ namespace xcas
             lv_obj_clear_flag(root_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(root_);
         }
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        setScreenKeyboardVisible(screen_keyboard_visible_);
+#endif
         if (input_group_ != nullptr && input_box_ != nullptr) {
             lv_group_focus_obj(input_box_);
         }
@@ -2613,6 +2891,14 @@ namespace xcas
         if (root_ != nullptr) {
             lv_obj_add_flag(root_, LV_OBJ_FLAG_HIDDEN);
         }
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        if (screen_keyboard_ != nullptr) {
+            lv_obj_add_flag(screen_keyboard_, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (keyboard_mode_bar_ != nullptr) {
+            lv_obj_add_flag(keyboard_mode_bar_, LV_OBJ_FLAG_HIDDEN);
+        }
+#endif
     }
 
     void XcasUi::releaseUi()
@@ -2624,6 +2910,17 @@ namespace xcas
         if (editor_preview_host_ != nullptr) {
             lv_obj_delete(editor_preview_host_);
         }
+        if (editor_preview_back_btn_ != nullptr) {
+            lv_obj_delete(editor_preview_back_btn_);
+        }
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        if (screen_keyboard_ != nullptr) {
+            lv_obj_delete(screen_keyboard_);
+        }
+        if (keyboard_mode_bar_ != nullptr) {
+            lv_obj_delete(keyboard_mode_bar_);
+        }
+#endif
         if (root_ != nullptr) {
             lv_obj_delete(root_);
         }
@@ -2636,9 +2933,11 @@ namespace xcas
         editor_preview_host_ = nullptr;
         editor_preview_formula_ = nullptr;
         editor_preview_label_ = nullptr;
+        editor_preview_back_btn_ = nullptr;
         editor_hint_label_ = nullptr;
         input_box_ = nullptr;
-        ac_hint_label_ = nullptr;
+        screen_keyboard_ = nullptr;
+        keyboard_mode_bar_ = nullptr;
         root_ = nullptr;
         lv_style_reset(&busy_style_);
         lvgl_initialized_ = false;
@@ -2711,89 +3010,6 @@ namespace xcas
         }
 
         std::fclose(f);
-    }
-
-    // ── Autocomplete ────────────────────────────────────────────────────────
-
-    void XcasUi::updateAutocomplete()
-    {
-        if (input_box_ == nullptr) return;
-
-        const char *txt = lv_textarea_get_text(input_box_);
-        if (txt == nullptr) { hideAutocomplete(); return; }
-
-        int pos = static_cast<int>(lv_textarea_get_cursor_pos(input_box_));
-        if (pos <= 0) { hideAutocomplete(); return; }
-
-        // Find start of the current word (letters/digits)
-        int ws = pos - 1;
-        while (ws > 0 && (std::isalpha(static_cast<unsigned char>(txt[ws - 1])) ||
-                          std::isdigit(static_cast<unsigned char>(txt[ws - 1])) ||
-                          txt[ws - 1] == '_')) {
-            --ws;
-        }
-        int word_len = pos - ws;
-        if (word_len < 2) { hideAutocomplete(); return; }
-
-        std::string prefix(txt + ws, static_cast<size_t>(word_len));
-
-        ac_candidates_.clear();
-        for (int i = 0; kAcWords[i] != nullptr; ++i) {
-            if (std::strncmp(kAcWords[i], prefix.c_str(), static_cast<size_t>(word_len)) == 0 &&
-                std::strcmp(kAcWords[i], prefix.c_str()) != 0) {
-                ac_candidates_.push_back(kAcWords[i]);
-                if (ac_candidates_.size() >= 4) break;
-            }
-        }
-
-        if (ac_candidates_.empty()) {
-            hideAutocomplete();
-            return;
-        }
-
-        ac_prefix_ = prefix;
-        ac_index_ = 0;
-
-        if (ac_hint_label_ != nullptr) {
-            const char *best = ac_candidates_[0];
-            const char *suffix = best + ac_prefix_.size();
-            if (suffix[0] == '\0') {
-                hideAutocomplete();
-                return;
-            }
-
-            std::string left(txt, static_cast<size_t>(pos));
-            lv_point_t sz;
-            lv_text_get_size(&sz, left.c_str(), &lv_font_source_han_sans_sc_14_cjk, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-
-            lv_label_set_text(ac_hint_label_, suffix);
-            lv_obj_set_pos(ac_hint_label_, static_cast<lv_coord_t>(6 + sz.x), 5);
-            lv_obj_clear_flag(ac_hint_label_, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-
-    void XcasUi::applyAutocomplete()
-    {
-        if (ac_candidates_.empty() || ac_index_ >= static_cast<int>(ac_candidates_.size())) {
-            hideAutocomplete();
-            return;
-        }
-
-        const char *word   = ac_candidates_[static_cast<size_t>(ac_index_)];
-        const char *suffix = word + ac_prefix_.size(); // chars to append
-
-        appendInput(suffix);
-        appendInput("("); // open paren for function call
-        hideAutocomplete();
-    }
-
-    void XcasUi::hideAutocomplete()
-    {
-        ac_candidates_.clear();
-        if (ac_hint_label_ != nullptr) {
-            lv_label_set_text(ac_hint_label_, "");
-            lv_obj_add_flag(ac_hint_label_, LV_OBJ_FLAG_HIDDEN);
-        }
     }
 
 } // namespace xcas

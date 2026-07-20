@@ -9,6 +9,8 @@
 #include "lvgl.h"
 
 LV_FONT_DECLARE(lv_font_symbols_14)
+LV_FONT_DECLARE(lv_font_symbols_18)
+LV_FONT_DECLARE(lv_font_symbols_22)
 
 namespace xcas::mathlayout
 {
@@ -138,6 +140,20 @@ bool shouldUseSymbolsFont(uint32_t cp)
     default:
         return false;
     }
+}
+
+const lv_font_t *symbolsFontFor(const lv_font_t *font)
+{
+    if (font != nullptr) {
+        const int line_height = lv_font_get_line_height(font);
+        if (line_height >= 21) {
+            return &lv_font_symbols_22;
+        }
+        if (line_height >= 17) {
+            return &lv_font_symbols_18;
+        }
+    }
+    return &lv_font_symbols_14;
 }
 
 std::vector<Utf8Glyph> splitUtf8Glyphs(const std::string &line)
@@ -612,7 +628,7 @@ int maxGlyphAdvance(const TextBox &box, const lv_font_t *font)
             const uint32_t next = (i + 1U < glyphs.size()) ? glyphs[i + 1U].codepoint : 0U;
             int adv = 0;
             if (shouldUseSymbolsFont(cp)) {
-                adv = static_cast<int>(lv_font_get_glyph_width(&lv_font_symbols_14, cp, next));
+                adv = static_cast<int>(lv_font_get_glyph_width(symbolsFontFor(font), cp, next));
             }
             if (adv == 0) {
                 adv = static_cast<int>(lv_font_get_glyph_width(font, cp, next));
@@ -780,7 +796,7 @@ bool createObjectForCommand(lv_obj_t *host,
             return false;
         }
 
-        const lv_font_t *glyph_font = shouldUseSymbolsFont(cp) ? &lv_font_symbols_14 : font;
+        const lv_font_t *glyph_font = shouldUseSymbolsFont(cp) ? symbolsFontFor(font) : font;
         const int glyph_w = std::max(1, static_cast<int>(lv_font_get_glyph_width(glyph_font, cp, 0)));
         const int glyph_h = std::max(1, static_cast<int>(lv_font_get_line_height(glyph_font)));
         IntRect glyph_rect = {

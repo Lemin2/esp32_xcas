@@ -14,6 +14,17 @@
 #include "esp_lcd_panel_vendor.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
+#include "lvgl.h"
+#include "sdkconfig.h"
+
+#if CONFIG_XCAS_BOARD_TAB5
+#include "bsp/esp-bsp.h"
+#include "bsp/display.h"
+#if CONFIG_XCAS_ENABLE_USB_HID_INPUT
+#include "esp_lvgl_port_usbhid.h"
+#endif
+#endif
 
 namespace board {
 namespace {
@@ -46,10 +57,110 @@ constexpr int kMidiSynthTxBufferLen = 256;
 constexpr int kMidiSynthRxBufferLen = 512;
 constexpr int kKeyRowCount = 4;
 constexpr int kKeyColCount = 14;
+constexpr uint64_t kFnBit = (1ULL << 28);
+constexpr uint64_t kShiftBit = (1ULL << 29);
+constexpr uint64_t kToggleDebounceUs = 120000;
+
+struct KeyLabel {
+    const char *base;
+    const char *shifted;
+};
+
+constexpr KeyLabel kKeyMap[kKeyRowCount][kKeyColCount] = {
+    {
+        {"`", "~"}, {"1", "!"}, {"2", "@"}, {"3", "#"}, {"4", "$"}, {"5", "%"}, {"6", "^"},
+        {"7", "&"}, {"8", "*"}, {"9", "("}, {"0", ")"}, {"-", "_"}, {"=", "+"}, {"Backspace", "Backspace"},
+    },
+    {
+        {"Tab", "Tab"}, {"q", "Q"}, {"w", "W"}, {"e", "E"}, {"r", "R"}, {"t", "T"}, {"y", "Y"},
+        {"u", "U"}, {"i", "I"}, {"o", "O"}, {"p", "P"}, {"[", "{"}, {"]", "}"}, {"\\", "|"},
+    },
+    {
+        {"Fn", "Fn"}, {"Shift", "Shift"}, {"a", "A"}, {"s", "S"}, {"d", "D"}, {"f", "F"}, {"g", "G"},
+        {"h", "H"}, {"j", "J"}, {"k", "K"}, {"l", "L"}, {";", ":"}, {"'", "\""}, {"Enter", "Enter"},
+    },
+    {
+        {"Ctrl", "Ctrl"}, {"Opt", "Opt"}, {"Alt", "Alt"}, {"z", "Z"}, {"x", "X"}, {"c", "C"}, {"v", "V"},
+        {"b", "B"}, {"n", "N"}, {"m", "M"}, {",", "<"}, {".", ">"}, {"/", "?"}, {"Space", "Space"},
+    },
+};
 
 constexpr int keyIndex(int row, int col)
 {
     return row * kKeyColCount + col;
+}
+
+bool keyIs(const KeyLabel &key, const char *name)
+{
+    return std::strcmp(key.base, name) == 0;
+}
+
+bool mapToLvglKey(int key_index, bool fn_active, bool shift_active, uint32_t &out)
+{
+    const int row = key_index / kKeyColCount;
+    const int col = key_index % kKeyColCount;
+    if (row < 0 || row >= kKeyRowCount || col < 0 || col >= kKeyColCount) {
+        return false;
+    }
+
+    const KeyLabel &key = kKeyMap[row][col];
+    if (keyIs(key, "Fn") || keyIs(key, "Shift") || keyIs(key, "Ctrl") || keyIs(key, "Opt") || keyIs(key, "Alt")) {
+        return false;
+    }
+
+    if (fn_active) {
+        if (keyIs(key, "q") || keyIs(key, "w") || keyIs(key, "p")) {
+            return false;
+        }
+        if (keyIs(key, ";")) {
+            out = LV_KEY_UP;
+            return true;
+        }
+        if (keyIs(key, ".")) {
+            out = LV_KEY_DOWN;
+            return true;
+        }
+        if (keyIs(key, ",")) {
+            out = LV_KEY_LEFT;
+            return true;
+        }
+        if (keyIs(key, "/")) {
+            out = LV_KEY_RIGHT;
+            return true;
+        }
+        if (keyIs(key, "Backspace")) {
+            out = LV_KEY_DEL;
+            return true;
+        }
+        if (keyIs(key, "`")) {
+            out = LV_KEY_ESC;
+            return true;
+        }
+    }
+
+    if (keyIs(key, "Enter")) {
+        out = LV_KEY_ENTER;
+        return true;
+    }
+    if (keyIs(key, "Backspace")) {
+        out = LV_KEY_BACKSPACE;
+        return true;
+    }
+    if (keyIs(key, "Tab")) {
+        out = '\t';
+        return true;
+    }
+    if (keyIs(key, "Space")) {
+        out = ' ';
+        return true;
+    }
+    const char *label = shift_active ? key.shifted : key.base;
+    if (label != nullptr && label[0] != '\0' && label[1] == '\0') {
+        out = static_cast<uint32_t>(static_cast<unsigned char>(label[0]));
+        return true;
+    }
+
+    return false;
 }
 
 } // namespace
@@ -67,6 +178,48 @@ bool CardputerBsp::onColorTransferDone(esp_lcd_panel_io_handle_t, esp_lcd_panel_
 
 void CardputerBsp::initializeDisplay()
 {
+#if CONFIG_XCAS_BOARD_TAB5
+    bsp_display_cfg_t display_cfg = {
+        .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
+        .buffer_size = BSP_LCD_H_RES * BSP_LCD_V_RES,
+        .double_buffer = true,
+        .flags = {
+            .buff_dma = true,
+            .buff_spiram = true,
+            .sw_rotate = true,
+        },
+    };
+    display_cfg.lvgl_port_cfg.task_priority = 5;
+    display_cfg.lvgl_port_cfg.task_stack = 8192;
+    display_cfg.lvgl_port_cfg.task_affinity = 0;
+    display_cfg.lvgl_port_cfg.task_max_sleep_ms = 20;
+    external_display_ = bsp_display_start_with_config(&display_cfg);
+    if (external_display_ == nullptr) {
+        ESP_LOGE(kTag, "Tab5 BSP display start failed");
+        return;
+    }
+    lv_display_set_rotation(external_display_, LV_DISPLAY_ROTATION_90);
+    touch_indev_ = bsp_display_get_input_dev();
+#if CONFIG_XCAS_ENABLE_USB_HID_INPUT
+    esp_err_t usb_ret = bsp_usb_host_start(BSP_USB_HOST_POWER_MODE_USB_DEV, false);
+    if (usb_ret == ESP_OK) {
+#ifdef ESP_LVGL_PORT_USB_HOST_HID_COMPONENT
+        const lvgl_port_hid_keyboard_cfg_t hid_keyboard_cfg = {
+            .disp = external_display_,
+        };
+        usb_hid_keyboard_indev_ = lvgl_port_add_usb_hid_keyboard_input(&hid_keyboard_cfg);
+        ESP_LOGI(kTag, "USB HID keyboard %s", usb_hid_keyboard_indev_ != nullptr ? "enabled" : "not available");
+#else
+        ESP_LOGW(kTag, "USB HID keyboard requested but usb_host_hid component is unavailable");
+#endif
+    } else {
+        ESP_LOGW(kTag, "USB host start failed: %s", esp_err_to_name(usb_ret));
+    }
+#endif
+    (void)bsp_display_brightness_set(100);
+    ESP_LOGI(kTag, "Tab5 display initialized: %dx%d touch=%s",
+             displayWidth(), displayHeight(), touch_indev_ != nullptr ? "yes" : "no");
+#else
     gpio_config_t backlight_config = {};
     backlight_config.pin_bit_mask = (1ULL << kPinLcdBl);
     backlight_config.mode = GPIO_MODE_OUTPUT;
@@ -125,10 +278,15 @@ void CardputerBsp::initializeDisplay()
             ESP_LOGW(kTag, "screenshot shadow buffer allocation failed");
         }
     }
+#endif
 }
 
 void CardputerBsp::initializeKeyboard()
 {
+#if !CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD
+    ESP_LOGI(kTag, "physical keyboard disabled");
+    return;
+#else
     gpio_config_t selector_config = {};
     selector_config.pin_bit_mask = (1ULL << kPinKbdA0) | (1ULL << kPinKbdA1) | (1ULL << kPinKbdA2);
     selector_config.mode = GPIO_MODE_OUTPUT;
@@ -150,10 +308,15 @@ void CardputerBsp::initializeKeyboard()
     ESP_ERROR_CHECK(gpio_config(&column_config));
 
     setKeyboardRow(0);
+#endif
 }
 
 void CardputerBsp::initializeMidiUart()
 {
+#if CONFIG_XCAS_BOARD_TAB5
+    ESP_LOGI(kTag, "MIDI UART not configured for Tab5 BSP path");
+    return;
+#else
     uart_config_t uart_config = {};
     uart_config.baud_rate = kMidiSynthBaudRate;
     uart_config.data_bits = UART_DATA_8_BITS;
@@ -165,20 +328,116 @@ void CardputerBsp::initializeMidiUart()
     ESP_ERROR_CHECK(uart_driver_install(kMidiSynthUart, kMidiSynthRxBufferLen, kMidiSynthTxBufferLen, 0, nullptr, 0));
     ESP_ERROR_CHECK(uart_param_config(kMidiSynthUart, &uart_config));
     ESP_ERROR_CHECK(uart_set_pin(kMidiSynthUart, kPinPortATx, kPinPortARx, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+#endif
+}
+
+int CardputerBsp::displayWidth() const
+{
+    lv_display_t *disp = lv_display_get_default();
+    if (disp != nullptr) {
+        return lv_display_get_horizontal_resolution(disp);
+    }
+#if CONFIG_XCAS_BOARD_TAB5
+    return BSP_LCD_H_RES;
+#else
+    return kDisplayWidth;
+#endif
+}
+
+int CardputerBsp::displayHeight() const
+{
+    lv_display_t *disp = lv_display_get_default();
+    if (disp != nullptr) {
+        return lv_display_get_vertical_resolution(disp);
+    }
+#if CONFIG_XCAS_BOARD_TAB5
+    return BSP_LCD_V_RES;
+#else
+    return kDisplayHeight;
+#endif
+}
+
+int CardputerBsp::statusBarHeight() const
+{
+    if (hasTouchInput()) {
+        return 64;
+    }
+    return displayHeight() >= 480 ? 32 : 16;
+}
+
+bool CardputerBsp::usesExternalLvglPort() const
+{
+#if CONFIG_XCAS_BOARD_TAB5
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool CardputerBsp::hasTouchInput() const
+{
+#if CONFIG_XCAS_BOARD_TAB5
+    return touch_indev_ != nullptr;
+#else
+    return false;
+#endif
+}
+
+bool CardputerBsp::hasPhysicalKeyboard() const
+{
+#if CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool CardputerBsp::lockLvgl(uint32_t timeout_ms)
+{
+#if CONFIG_XCAS_BOARD_TAB5
+    return bsp_display_lock(timeout_ms);
+#else
+    (void)timeout_ms;
+    return true;
+#endif
+}
+
+void CardputerBsp::unlockLvgl()
+{
+#if CONFIG_XCAS_BOARD_TAB5
+    bsp_display_unlock();
+#endif
+}
+
+lv_indev_t *CardputerBsp::touchInputDevice() const
+{
+    return touch_indev_;
 }
 
 void CardputerBsp::presentFrame(const uint16_t *framebuffer)
 {
+#if CONFIG_XCAS_BOARD_TAB5
+    (void)framebuffer;
+#else
     ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_, 0, 0, kDisplayWidth, kDisplayHeight, framebuffer));
     stashScreenshotRegion(0, 0, kDisplayWidth, kDisplayHeight, framebuffer);
     xSemaphoreTake(lcd_flush_done_, portMAX_DELAY);
+#endif
 }
 
 void CardputerBsp::presentArea(int x1, int y1, int x2, int y2, const uint16_t *pixels)
 {
+#if CONFIG_XCAS_BOARD_TAB5
+    (void)x1;
+    (void)y1;
+    (void)x2;
+    (void)y2;
+    (void)pixels;
+#else
     ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(panel_, x1, y1, x2, y2, pixels));
     stashScreenshotRegion(x1, y1, x2, y2, pixels);
     xSemaphoreTake(lcd_flush_done_, portMAX_DELAY);
+#endif
 }
 
 void CardputerBsp::stashScreenshotRegion(int x1, int y1, int x2, int y2, const uint16_t *pixels)
@@ -256,6 +515,9 @@ void CardputerBsp::emitScreenshot()
 
 uint64_t CardputerBsp::scanKeyboardState()
 {
+#if !CONFIG_XCAS_HAS_PHYSICAL_KEYBOARD
+    return 0;
+#else
     uint64_t pressed = 0;
     for (uint8_t row = 0; row < 8; ++row) {
         setKeyboardRow(row);
@@ -275,19 +537,112 @@ uint64_t CardputerBsp::scanKeyboardState()
         }
     }
     return pressed;
+#endif
+}
+
+void CardputerBsp::updateKeyboard()
+{
+    const uint64_t raw_mask = scanKeyboardState();
+    const uint64_t previous_mask = previous_keyboard_state_.load(std::memory_order_relaxed);
+    const uint64_t newly_pressed = raw_mask & ~previous_mask;
+    const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
+
+    if ((newly_pressed & kFnBit) != 0U && now_us - last_fn_toggle_us_ >= kToggleDebounceUs) {
+        fn_latched_ = !fn_latched_;
+        last_fn_toggle_us_ = now_us;
+    }
+    if ((newly_pressed & kShiftBit) != 0U && now_us - last_shift_toggle_us_ >= kToggleDebounceUs) {
+        shift_latched_ = !shift_latched_;
+        last_shift_toggle_us_ = now_us;
+    }
+
+    const bool fn_active = ((raw_mask & kFnBit) != 0U) || fn_latched_;
+    const bool shift_active = ((raw_mask & kShiftBit) != 0U) || shift_latched_;
+    keyboard_state_.store(raw_mask, std::memory_order_relaxed);
+    fn_active_.store(fn_active, std::memory_order_relaxed);
+    shift_active_.store(shift_active, std::memory_order_relaxed);
+
+    for (int idx = 0; idx < kKeyRowCount * kKeyColCount; ++idx) {
+        const uint64_t bit = (1ULL << idx);
+        if ((newly_pressed & bit) == 0U) {
+            continue;
+        }
+
+        uint32_t mapped = 0;
+        if (mapToLvglKey(idx, fn_active, shift_active, mapped)) {
+            pushMappedKey(mapped);
+        }
+    }
+
+    previous_keyboard_state_.store(raw_mask, std::memory_order_relaxed);
+}
+
+uint64_t CardputerBsp::keyboardState() const
+{
+    return keyboard_state_.load(std::memory_order_relaxed);
+}
+
+bool CardputerBsp::fnActive() const
+{
+    return fn_active_.load(std::memory_order_relaxed);
+}
+
+bool CardputerBsp::shiftActive() const
+{
+    return shift_active_.load(std::memory_order_relaxed);
+}
+
+void CardputerBsp::pushMappedKey(uint32_t key)
+{
+    const uint8_t tail = mapped_tail_.load(std::memory_order_relaxed);
+    uint8_t head = mapped_head_.load(std::memory_order_acquire);
+    const uint8_t next_tail = static_cast<uint8_t>((tail + 1U) % mapped_keys_.size());
+
+    if (next_tail == head) {
+        head = static_cast<uint8_t>((head + 1U) % mapped_keys_.size());
+        mapped_head_.store(head, std::memory_order_release);
+    }
+
+    mapped_keys_[tail] = key;
+    mapped_tail_.store(next_tail, std::memory_order_release);
+}
+
+bool CardputerBsp::popMappedKey(uint32_t &key)
+{
+    const uint8_t head = mapped_head_.load(std::memory_order_relaxed);
+    const uint8_t tail = mapped_tail_.load(std::memory_order_acquire);
+    if (head == tail) {
+        return false;
+    }
+
+    key = mapped_keys_[head];
+    const uint8_t next_head = static_cast<uint8_t>((head + 1U) % mapped_keys_.size());
+    mapped_head_.store(next_head, std::memory_order_release);
+    return true;
 }
 
 void CardputerBsp::writeMidi(const uint8_t *data, std::size_t len)
 {
+#if CONFIG_XCAS_BOARD_TAB5
+    (void)data;
+    (void)len;
+#else
     const int written = uart_write_bytes(kMidiSynthUart, data, len);
     if (written != static_cast<int>(len)) {
         ESP_LOGW(kTag, "PORT.A short write: %d", written);
     }
+#endif
 }
 
 int CardputerBsp::readMidiByte(uint8_t *byte, TickType_t timeout)
 {
+#if CONFIG_XCAS_BOARD_TAB5
+    (void)byte;
+    (void)timeout;
+    return 0;
+#else
     return uart_read_bytes(kMidiSynthUart, byte, 1, timeout);
+#endif
 }
 
 void CardputerBsp::setKeyboardRow(uint8_t row)

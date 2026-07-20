@@ -61,6 +61,9 @@ constexpr int kAngleCount = 2;
 const int kDigitsValues[] = {12, 15, 20, 30};
 constexpr int kDigitsCount = 4;
 
+const char *const kPreviewModeValues[] = {"Graphic", "Text"};
+constexpr int kPreviewModeCount = 2;
+
 bool isSdMounted()
 {
     struct stat st = {};
@@ -143,7 +146,7 @@ bool wifiInitOnce()
 
 } // namespace
 
-SettingsApp::SettingsApp(ServiceHub &services) : cas_(services.casService())
+SettingsApp::SettingsApp(ServiceHub &services) : services_(services), cas_(services.casService())
 {
 }
 
@@ -163,15 +166,17 @@ void SettingsApp::ensureUi()
         return;
     }
 
-    const lv_coord_t w = static_cast<lv_coord_t>(board::CardputerBsp::kDisplayWidth);
-    const lv_coord_t h = static_cast<lv_coord_t>(board::CardputerBsp::kDisplayHeight);
+    const lv_coord_t w = static_cast<lv_coord_t>(services_.board().displayWidth());
+    const lv_coord_t h = static_cast<lv_coord_t>(services_.board().displayHeight());
+    const lv_coord_t status_h = static_cast<lv_coord_t>(services_.board().statusBarHeight());
+    const bool touch = services_.board().hasTouchInput();
 
     root_ = lv_obj_create(screen);
     lv_obj_remove_style_all(root_);
-    lv_obj_set_size(root_, w, h - 16);
-    lv_obj_align(root_, LV_ALIGN_TOP_LEFT, 0, 16);
+    lv_obj_set_size(root_, w, h - status_h);
+    lv_obj_align(root_, LV_ALIGN_TOP_LEFT, 0, status_h);
     ui_theme::applyPage(root_, LV_COLOR_MAKE(245, 245, 238));
-    lv_obj_set_style_pad_all(root_, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(root_, touch ? 10 : 4, LV_PART_MAIN);
     lv_obj_set_flex_flow(root_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(root_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_clear_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
@@ -219,6 +224,7 @@ void SettingsApp::ensureUi()
 
     addMenuEntry(calc_page_, Page::Calculator, Item::Angle, "Angle mode");
     addMenuEntry(calc_page_, Page::Calculator, Item::Precision, "Precision");
+    addMenuEntry(calc_page_, Page::Calculator, Item::FormulaPreviewMode, "Formula preview");
     addMenuEntry(calc_page_, Page::Calculator, Item::FnSwitch, "Fn app switch", true);
 
     addMenuEntry(wifi_page_, Page::Wifi, Item::WifiEnable, "WiFi power", true);
@@ -261,26 +267,30 @@ SettingsApp::MenuEntry *SettingsApp::addMenuEntry(lv_obj_t *page_obj, Page page,
     entry.row = lv_menu_cont_create(page_obj);
     lv_obj_add_flag(entry.row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(entry.row, &SettingsApp::menuEntryEventCb, LV_EVENT_ALL, this);
-    lv_obj_set_height(entry.row, 24);
+    const bool touch = services_.board().hasTouchInput();
+    lv_obj_set_height(entry.row, touch ? 52 : 24);
     lv_obj_set_width(entry.row, lv_pct(100));
     lv_obj_set_flex_flow(entry.row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(entry.row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
-    ui_theme::applyRowCard(entry.row, LV_COLOR_MAKE(208, 214, 224), 4, 7, 7);
+    ui_theme::applyRowCard(entry.row, LV_COLOR_MAKE(208, 214, 224), touch ? 8 : 4, touch ? 12 : 7, touch ? 12 : 7);
 
     entry.name = lv_label_create(entry.row);
+    lv_obj_add_flag(entry.name, LV_OBJ_FLAG_EVENT_BUBBLE);
     ui_theme::applyText14(entry.name);
     lv_label_set_text(entry.name, name);
     lv_obj_set_flex_grow(entry.name, 1);
 
     if (with_toggle) {
         entry.toggle = lv_switch_create(entry.row);
-        lv_obj_set_size(entry.toggle, 28, 16);
+        lv_obj_add_flag(entry.toggle, LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_set_size(entry.toggle, touch ? 54 : 28, touch ? 30 : 16);
     } else {
         entry.value = lv_label_create(entry.row);
+        lv_obj_add_flag(entry.value, LV_OBJ_FLAG_EVENT_BUBBLE);
         ui_theme::applyText14(entry.value);
         lv_label_set_long_mode(entry.value, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_style_max_width(entry.value, 132, LV_PART_MAIN);
+        lv_obj_set_style_max_width(entry.value, touch ? 260 : 132, LV_PART_MAIN);
     }
 
     return &entry;
@@ -392,6 +402,10 @@ void SettingsApp::refreshMenu()
     std::snprintf(digbuf, sizeof(digbuf), "%d", kDigitsValues[digits_index_]);
     if (MenuEntry *entry = findEntry(Item::Precision); entry != nullptr && entry->value != nullptr) {
         lv_label_set_text(entry->value, digbuf);
+    }
+
+    if (MenuEntry *entry = findEntry(Item::FormulaPreviewMode); entry != nullptr && entry->value != nullptr) {
+        lv_label_set_text(entry->value, kPreviewModeValues[formula_preview_mode_]);
     }
 
     if (MenuEntry *entry = findEntry(Item::FnSwitch); entry != nullptr && entry->toggle != nullptr) {
@@ -599,6 +613,12 @@ void SettingsApp::applyHorizontalAction(int dir)
         cfg.digits_index = digits_index_;
         settings::set(cfg);
         settings::save();
+    } else if (selected_item_ == Item::FormulaPreviewMode) {
+        formula_preview_mode_ = (formula_preview_mode_ + kPreviewModeCount + dir) % kPreviewModeCount;
+        settings::AppSettings cfg = settings::get();
+        cfg.formula_preview_mode = formula_preview_mode_;
+        settings::set(cfg);
+        settings::save();
     } else if (selected_item_ == Item::FnSwitch) {
         fn_app_switch_enabled_ = !fn_app_switch_enabled_;
         applyFnSwitch();
@@ -659,6 +679,7 @@ void SettingsApp::activateSelected()
     } else if (selected_item_ == Item::WifiEnable || selected_item_ == Item::BtEnable ||
                selected_item_ == Item::FnSwitch || selected_item_ == Item::SdCard ||
                selected_item_ == Item::Angle || selected_item_ == Item::Precision ||
+               selected_item_ == Item::FormulaPreviewMode ||
                selected_item_ == Item::ClockDate || selected_item_ == Item::ClockTime ||
                selected_item_ == Item::StatusWifiIcon || selected_item_ == Item::StatusBtIcon ||
                selected_item_ == Item::StatusMemory || selected_item_ == Item::StatusMemoryUnit ||
@@ -1081,6 +1102,7 @@ void SettingsApp::onFocus()
 
     angle_index_ = (cfg.angle_index == 1) ? 1 : 0;
     digits_index_ = (cfg.digits_index >= 0 && cfg.digits_index < kDigitsCount) ? cfg.digits_index : 0;
+    formula_preview_mode_ = (cfg.formula_preview_mode >= 0 && cfg.formula_preview_mode < kPreviewModeCount) ? cfg.formula_preview_mode : 0;
     fn_app_switch_enabled_ = cfg.fn_app_switch_enabled;
     wifi_enabled_ = kWifiBuilt && cfg.wifi_enabled;
     bt_hid_enabled_ = kBtBuilt && cfg.bt_hid_enabled;
@@ -1147,11 +1169,6 @@ void SettingsApp::releaseUi()
     current_page_ = Page::Root;
     editing_ = false;
     ui_ready_ = false;
-}
-
-void SettingsApp::handleKeyboardState(uint64_t pressedMask)
-{
-    prev_mask_ = pressedMask;
 }
 
 void SettingsApp::handleMappedKey(uint32_t key)

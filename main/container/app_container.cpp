@@ -1,6 +1,8 @@
 #include "container/app_container.hpp"
 
+#include <algorithm>
 #include <array>
+#include <vector>
 
 #include "esp_log.h"
 
@@ -25,9 +27,9 @@ public:
         return true;
     }
 
-    void handleKeyboardState(uint64_t pressedMask) override
+    void handleMappedKey(uint32_t key) override
     {
-        ui_.handleKeyboardState(pressedMask);
+        ui_.enqueueInputKey(key);
     }
 
     void render() override
@@ -68,37 +70,45 @@ bool AppContainer::start()
 
 uint64_t AppContainer::scanKeyboardState()
 {
-    return board_.scanKeyboardState();
+    board_.updateKeyboard();
+    return board_.keyboardState();
 }
 
 void AppContainer::handleKeyboardState(uint64_t pressedMask)
 {
-    if (calcApp_) {
-        calcApp_->handleKeyboardState(pressedMask);
-    }
+    (void)pressedMask;
 }
 
 void AppContainer::render()
 {
     if (calcApp_) {
+        uint32_t key = 0;
+        while (board_.popMappedKey(key)) {
+            calcApp_->handleMappedKey(key);
+        }
         calcApp_->render();
     }
 }
 
 void AppContainer::drawBootSplash()
 {
-    std::array<uint16_t, board::CardputerBsp::kDisplayWidth> line{};
-    for (int y = 0; y < board::CardputerBsp::kDisplayHeight; ++y) {
+    if (board_.usesExternalLvglPort()) {
+        ESP_LOGI(kTag, "boot splash skipped; external LVGL port active");
+        return;
+    }
+
+    std::vector<uint16_t> line(static_cast<size_t>(board_.displayWidth()));
+    for (int y = 0; y < board_.displayHeight(); ++y) {
         uint16_t color = rgb565(20, 20, 20);
-        if (y < board::CardputerBsp::kDisplayHeight / 3) {
+        if (y < board_.displayHeight() / 3) {
             color = rgb565(220, 40, 40);
-        } else if (y < (board::CardputerBsp::kDisplayHeight * 2) / 3) {
+        } else if (y < (board_.displayHeight() * 2) / 3) {
             color = rgb565(40, 190, 70);
         } else {
             color = rgb565(40, 110, 220);
         }
-        line.fill(color);
-        board_.presentArea(0, y, board::CardputerBsp::kDisplayWidth, y + 1, line.data());
+        std::fill(line.begin(), line.end(), color);
+        board_.presentArea(0, y, board_.displayWidth(), y + 1, line.data());
     }
     ESP_LOGI(kTag, "boot splash rendered");
 }

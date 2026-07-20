@@ -1,7 +1,6 @@
 #include "brookesia/core/ui_theme.hpp"
 
-LV_FONT_DECLARE(lv_font_noto_math_14)
-LV_FONT_DECLARE(lv_font_symbols_14)
+#include "brookesia/core/ui_fonts.hpp"
 
 namespace brookesia::ui_theme
 {
@@ -13,9 +12,6 @@ constexpr lv_color_t kText16Color = LV_COLOR_MAKE(24, 84, 192);
 
 static lv_style_t s_text14;
 static lv_style_t s_text16;
-static lv_font_t s_font_text14;
-static lv_font_t s_font_text16;
-static lv_font_t s_font_symbols14;
 static bool s_initialized = false;
 
 void initOnce()
@@ -24,22 +20,14 @@ void initOnce()
         return;
     }
     s_initialized = true;
-
-    s_font_symbols14 = lv_font_symbols_14;
-    s_font_symbols14.fallback = &lv_font_noto_math_14;
-
-    s_font_text14 = lv_font_source_han_sans_sc_14_cjk;
-    s_font_text14.fallback = &s_font_symbols14;
-
-    s_font_text16 = lv_font_source_han_sans_sc_16_cjk;
-    s_font_text16.fallback = &s_font_symbols14;
+    ui_fonts::init();
 
     lv_style_init(&s_text14);
-    lv_style_set_text_font(&s_text14, &s_font_text14);
+    lv_style_set_text_font(&s_text14, ui_fonts::textFont14());
     lv_style_set_text_color(&s_text14, kText14Color);
 
     lv_style_init(&s_text16);
-    lv_style_set_text_font(&s_text16, &s_font_text16);
+    lv_style_set_text_font(&s_text16, ui_fonts::textFont16());
     lv_style_set_text_color(&s_text16, kText16Color);
 }
 
@@ -171,13 +159,13 @@ void applyText16(lv_obj_t *obj)
 const lv_font_t *textFont14()
 {
     initOnce();
-    return &s_font_text14;
+    return ui_fonts::textFont14();
 }
 
 const lv_font_t *textFont16()
 {
     initOnce();
-    return &s_font_text16;
+    return ui_fonts::textFont16();
 }
 
 } // namespace brookesia::ui_theme

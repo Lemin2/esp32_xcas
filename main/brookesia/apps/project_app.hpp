@@ -21,7 +21,6 @@ public:
     void onBlur() override;
     void releaseUi() override;
     bool handleMenuButton() override;
-    void handleKeyboardState(uint64_t pressedMask) override;
     void handleMappedKey(uint32_t key) override;
     void render() override;
 
@@ -62,6 +61,7 @@ private:
     int indexForRow(lv_obj_t *row) const;
     static void menuEntryEventCb(lv_event_t *e);
 
+    ServiceHub &services_;
     xcas::XcasService &cas_;
 
     lv_obj_t *root_ = nullptr;
@@ -83,7 +83,6 @@ private:
     std::string editor_path_;
     std::string run_script_;
     size_t run_pos_ = 0;
-    uint64_t prev_mask_ = 0;
 };
 
 } // namespace brookesia

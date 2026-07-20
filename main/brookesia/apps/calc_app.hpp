@@ -15,7 +15,7 @@ public:
     void onFocus() override;
     void onBlur() override;
     void releaseUi() override;
-    void handleKeyboardState(uint64_t pressedMask) override;
+    bool handleKeyboardToggle() override;
     void handleMappedKey(uint32_t key) override;
     void render() override;
     void debugSubmitFormula(const std::string &formula);

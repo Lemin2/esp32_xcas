@@ -17,41 +17,25 @@ namespace xcas
     class XcasUi
     {
     public:
-        struct KeyLabel
-        {
-            const char *base;
-            const char *shifted;
-        };
-
-        static constexpr int kKeyRowCount = 4;
-        static constexpr int kKeyColCount = 14;
-        static constexpr int kKeyCount = kKeyRowCount * kKeyColCount;
-
         XcasUi(board::CardputerBsp &board, XcasService &service);
 
-        void handleKeyboardState(uint64_t pressed_mask);
         void enqueueInputKey(uint32_t key);
         void render();
         void show();
         void hide();
         void releaseUi();
+        bool toggleScreenKeyboard();
         void debugSubmitFormula(const std::string &formula);
         void debugEmitFormulaImage(const std::string &formula);
 
     private:
-        static constexpr int kFnRow = 2;
-        static constexpr int kFnCol = 0;
-        static constexpr int kShiftRow = 2;
-        static constexpr int kShiftCol = 1;
-
-        static int keyIndex(int row, int col);
-        static const KeyLabel &keyAt(int row, int col);
-        static bool keyIsDown(uint64_t mask, int row, int col);
-        static bool keyIs(const KeyLabel &key, const char *name);
         static void lvglFlush(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map);
         static void onHistoryRowEvent(lv_event_t *e);
         static void lvglKeyboardRead(lv_indev_t *indev, lv_indev_data_t *data);
         static void onInputBoxEvent(lv_event_t *e);
+        static void onKeyboardModeEvent(lv_event_t *e);
+        static void onScreenKeyboardEvent(lv_event_t *e);
+        static void onPreviewBackEvent(lv_event_t *e);
 
         void initializeLvgl();
         void loadSession();
@@ -86,10 +70,12 @@ namespace xcas
         static std::string renderNatural2D(const std::string &expr, int depth = 0);
         static std::string centerText(const std::string &s, int width);
 
-        // Autocomplete
-        void updateAutocomplete();
-        void applyAutocomplete();
-        void hideAutocomplete();
+        void setScreenKeyboardMathMode(bool enabled);
+        void setScreenKeyboardMathPage(int page);
+        void setScreenKeyboardVisible(bool visible);
+        lv_coord_t screenKeyboardHeight() const;
+        lv_coord_t screenKeyboardBottomReserved() const;
+        void updateScreenKeyboardLayout();
 
         board::CardputerBsp &board_;
         XcasService &service_;
@@ -108,9 +94,11 @@ namespace xcas
         lv_obj_t *editor_preview_host_;
         lv_obj_t *editor_preview_formula_;
         lv_obj_t *editor_preview_label_;
+        lv_obj_t *editor_preview_back_btn_;
         lv_obj_t *editor_hint_label_;
         lv_obj_t *input_box_;
-        lv_obj_t *ac_hint_label_;
+        lv_obj_t *screen_keyboard_;
+        lv_obj_t *keyboard_mode_bar_;
         lv_obj_t *root_;
 
         lv_style_t busy_style_;
@@ -125,7 +113,6 @@ namespace xcas
 
         std::vector<std::string> history_lines_;
         int selected_history_index_;
-        uint64_t previous_key_mask_;
         uint64_t last_render_us_;
         std::array<uint32_t, 64> key_queue_{};
         uint8_t key_queue_head_ = 0;
@@ -135,10 +122,11 @@ namespace xcas
         bool lvgl_initialized_;
         bool session_loaded_ = false;
         bool redraw_recovery_pending_;
-        bool fn_toggled_;
-        bool caps_toggled_;
         bool subjects_initialized_;
         bool editor_fullscreen_ = false;
+        bool screen_keyboard_math_ = false;
+        int screen_keyboard_page_ = 0;
+        bool screen_keyboard_visible_ = true;
 
         std::vector<uint16_t> pending_formula_shot_pixels_;
         size_t pending_formula_shot_byte_offset_ = 0;
@@ -147,11 +135,6 @@ namespace xcas
         int64_t pending_formula_shot_started_us_ = 0;
         int64_t pending_formula_shot_last_emit_us_ = 0;
         bool pending_formula_shot_active_ = false;
-
-        // Autocomplete
-        std::vector<const char *> ac_candidates_;
-        std::string ac_prefix_;
-        int ac_index_ = 0;
 
         bool preview_use_objects_ = false;
         int preview_content_w_ = 0;

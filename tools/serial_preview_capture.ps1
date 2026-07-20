@@ -4,7 +4,11 @@ param(
     [string]$OutDir = "captures/ui_preview_fullscreen_debug",
     [string]$FormulasFile = "",
     [int]$SubmitWaitMs = 1800,
-    [int]$ShotTimeoutMs = 25000
+    [int]$ShotTimeoutMs = 25000,
+    [switch]$DtrEnable,
+    [switch]$RtsEnable,
+    [int]$InitialWaitMs = 0,
+    [switch]$UiPreview
 )
 
 Set-StrictMode -Version Latest
@@ -47,6 +51,10 @@ function Read-ShotLines([System.IO.Ports.SerialPort]$serial, [int]$timeoutMs) {
     return @()
 }
 
+function Write-Command([System.IO.Ports.SerialPort]$serial, [string]$command) {
+    $serial.Write($command + "`r")
+}
+
 $formulas = @()
 if (-not [string]::IsNullOrWhiteSpace($FormulasFile)) {
     if (-not (Test-Path $FormulasFile)) {
@@ -65,13 +73,16 @@ $sp.NewLine = "`n"
 $sp.ReadTimeout = 250
 $sp.WriteTimeout = 1200
 $sp.Encoding = [System.Text.Encoding]::UTF8
-$sp.DtrEnable = $false
-$sp.RtsEnable = $false
+$sp.DtrEnable = [bool]$DtrEnable
+$sp.RtsEnable = [bool]$RtsEnable
 
 try {
     $sp.Open()
+    if ($InitialWaitMs -gt 0) {
+        Start-Sleep -Milliseconds $InitialWaitMs
+    }
     Start-Sleep -Milliseconds 300
-    $sp.WriteLine("ML HELP")
+    Write-Command -serial $sp -command "ML HELP"
     Start-Sleep -Milliseconds 100
 
     $index = 0
@@ -80,9 +91,13 @@ try {
         $txtPath = Join-Path $OutDir ("{0:D2}_preview.txt" -f $index)
         $pngPath = Join-Path $OutDir ("{0:D2}_preview.png" -f $index)
 
-        $sp.WriteLine("ML SUBMIT $formula")
-        Start-Sleep -Milliseconds $SubmitWaitMs
-        $sp.WriteLine("ML PREVIEW_SHOT")
+        if ($UiPreview) {
+            Write-Command -serial $sp -command "ML SUBMIT $formula"
+            Start-Sleep -Milliseconds $SubmitWaitMs
+            Write-Command -serial $sp -command "ML PREVIEW_SHOT"
+        } else {
+            Write-Command -serial $sp -command "ML PREVIEW_SHOT $formula"
+        }
 
         $shotLines = Read-ShotLines -serial $sp -timeoutMs $ShotTimeoutMs
         if (@($shotLines).Count -eq 0) {

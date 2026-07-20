@@ -1,0 +1,1 @@
+[[sqrt(2),sqrt(3),sqrt(5)],[sum(k,k,1,n),x^2,limit(sin(x)/x,x,0)]]

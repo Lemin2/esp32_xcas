@@ -52,6 +52,9 @@ void clampSettings(AppSettings &v)
     if (v.digits_index < 0 || v.digits_index > 3) {
         v.digits_index = 0;
     }
+    if (v.formula_preview_mode < 0 || v.formula_preview_mode > 1) {
+        v.formula_preview_mode = 0;
+    }
     if (v.clock_year < 2024 || v.clock_year > 2099) {
         v.clock_year = 2026;
     }
@@ -103,6 +106,8 @@ void load()
             s_settings.angle_index = std::atoi(value);
         } else if (std::strcmp(key, "digits_index") == 0) {
             s_settings.digits_index = std::atoi(value);
+        } else if (std::strcmp(key, "formula_preview_mode") == 0) {
+            s_settings.formula_preview_mode = std::atoi(value);
         } else if (std::strcmp(key, "fn_app_switch") == 0) {
             s_settings.fn_app_switch_enabled = parseBool(value);
         } else if (std::strcmp(key, "wifi_enabled") == 0) {
@@ -156,6 +161,7 @@ bool save()
 
     std::fprintf(f, "angle_index=%d\n", s_settings.angle_index);
     std::fprintf(f, "digits_index=%d\n", s_settings.digits_index);
+    std::fprintf(f, "formula_preview_mode=%d\n", s_settings.formula_preview_mode);
     std::fprintf(f, "fn_app_switch=%d\n", s_settings.fn_app_switch_enabled ? 1 : 0);
     std::fprintf(f, "wifi_enabled=%d\n", s_settings.wifi_enabled ? 1 : 0);
     std::fprintf(f, "bt_hid_enabled=%d\n", s_settings.bt_hid_enabled ? 1 : 0);

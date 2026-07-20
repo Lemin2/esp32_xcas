@@ -12,25 +12,14 @@
 #include "brookesia/core/ui_theme.hpp"
 #include "brookesia/apps/fs_util.hpp"
 
+#if LV_USE_GESTURE_RECOGNITION
+#include "src/indev/lv_indev_gesture.h"
+#endif
+
 namespace ui_theme = brookesia::ui_theme;
 
 namespace brookesia {
 namespace {
-
-constexpr uint64_t kFnBit = (1ULL << 28);
-constexpr uint64_t kShiftBit = (1ULL << 29);
-constexpr uint64_t kEnterBit = (1ULL << 41);
-constexpr uint64_t kBackspaceBit = (1ULL << 13);
-constexpr uint64_t kTabBit = (1ULL << 15);
-constexpr uint64_t kSpaceBit = (1ULL << 55);
-constexpr uint64_t kLeftBit = (1ULL << 52);
-constexpr uint64_t kRightBit = (1ULL << 54);
-constexpr uint64_t kUpBit = (1ULL << 39);
-constexpr uint64_t kDownBit = (1ULL << 53);
-constexpr uint64_t kKey1 = (1ULL << 1);
-constexpr uint64_t kKey2 = (1ULL << 2);
-constexpr uint64_t kKey3 = (1ULL << 3);
-constexpr uint64_t kKey4 = (1ULL << 4);
 
 constexpr int kFuncColorsCount = 4;
 const lv_color_t kFuncColors[kFuncColorsCount] = {
@@ -79,18 +68,6 @@ const char *const kMenuTableLabels[] = {
     "Rebuild table",
 };
 
-struct KeyLabel {
-    char base;
-    char shifted;
-};
-
-constexpr KeyLabel kKeyMap[4][14] = {
-    {{'`','~'},{'1','!'},{'2','@'},{'3','#'},{'4','$'},{'5','%'},{'6','^'},{'7','&'},{'8','*'},{'9','('},{'0',')'},{'-','_'},{'=','+'},{0,0}},
-    {{0,0},{'q','Q'},{'w','W'},{'e','E'},{'r','R'},{'t','T'},{'y','Y'},{'u','U'},{'i','I'},{'o','O'},{'p','P'},{'[','{'},{']','}'},{'\\','|'}},
-    {{0,0},{0,0},{'a','A'},{'s','S'},{'d','D'},{'f','F'},{'g','G'},{'h','H'},{'j','J'},{'k','K'},{'l','L'},{';',':'},{'\'', '"'},{0,0}},
-    {{0,0},{0,0},{0,0},{'z','Z'},{'x','X'},{'c','C'},{'v','V'},{'b','B'},{'n','N'},{'m','M'},{',','<'},{'.','>'},{'/','?'},{' ',' '}},
-};
-
 void styleLine(lv_obj_t *line, lv_color_t color, int width)
 {
     if (line == nullptr) {
@@ -98,6 +75,27 @@ void styleLine(lv_obj_t *line, lv_color_t color, int width)
     }
     lv_obj_set_style_line_width(line, width, LV_PART_MAIN);
     lv_obj_set_style_line_color(line, color, LV_PART_MAIN);
+}
+
+lv_point_t measureLabel(lv_obj_t *label, const char *text)
+{
+    lv_point_t size{1, 1};
+    if (label == nullptr || text == nullptr) {
+        return size;
+    }
+    const lv_font_t *font = static_cast<const lv_font_t *>(lv_obj_get_style_text_font(label, LV_PART_MAIN));
+    if (font == nullptr) {
+        font = ui_theme::textFont14();
+    }
+    lv_text_get_size(&size, text, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    size.x = std::max<lv_coord_t>(1, size.x);
+    size.y = std::max<lv_coord_t>(1, size.y);
+    return size;
+}
+
+int clampCoord(int value, int max_value)
+{
+    return std::clamp(value, 0, std::max(0, max_value));
 }
 
 lv_obj_t *createPlotLine(lv_obj_t *parent, lv_color_t color, int width)
@@ -146,41 +144,43 @@ void GraphApp::ensureUi()
 
     root_ = lv_obj_create(screen);
     lv_obj_remove_style_all(root_);
-    lv_obj_set_size(root_, kDisplayW, kRootH);
-    lv_obj_align(root_, LV_ALIGN_TOP_LEFT, 0, kStatusH);
+    lv_obj_set_size(root_, displayW(), rootH());
+    lv_obj_align(root_, LV_ALIGN_TOP_LEFT, 0, services_.board().statusBarHeight());
     ui_theme::applyPage(root_, LV_COLOR_MAKE(11, 15, 24));
     lv_obj_clear_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
 
     input_page_ = lv_obj_create(root_);
     lv_obj_remove_style_all(input_page_);
-    lv_obj_set_size(input_page_, kDisplayW, kRootH);
+    lv_obj_set_size(input_page_, displayW(), rootH());
     lv_obj_clear_flag(input_page_, LV_OBJ_FLAG_SCROLLABLE);
     ui_theme::applyPage(input_page_, LV_COLOR_MAKE(16, 20, 30));
     lv_obj_set_flex_flow(input_page_, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(input_page_, 4, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(input_page_, 3, LV_PART_MAIN);
+    const bool touch = services_.board().hasTouchInput();
+    lv_obj_set_style_pad_all(input_page_, touch ? 10 : 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(input_page_, touch ? 10 : 3, LV_PART_MAIN);
 
     input_list_ = lv_obj_create(input_page_);
     lv_obj_remove_style_all(input_list_);
-    lv_obj_set_width(input_list_, kDisplayW - 8);
+    lv_obj_set_width(input_list_, displayW() - 8);
     lv_obj_set_flex_grow(input_list_, 1);
     lv_obj_set_flex_flow(input_list_, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_all(input_list_, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_row(input_list_, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(input_list_, touch ? 8 : 2, LV_PART_MAIN);
 
     for (int i = 0; i < kMaxFuncs; ++i) {
         lv_obj_t *row = lv_obj_create(input_list_);
         input_rows_[i] = row;
-        lv_obj_set_width(row, kDisplayW - 8);
-        lv_obj_set_height(row, 22);
-        ui_theme::applyRowCard(row, LV_COLOR_MAKE(40, 55, 78), 4, 2, 2);
+        lv_obj_set_width(row, displayW() - (touch ? 20 : 8));
+        lv_obj_set_height(row, touch ? 56 : 22);
+        ui_theme::applyRowCard(row, LV_COLOR_MAKE(40, 55, 78), touch ? 8 : 4, touch ? 10 : 2, touch ? 10 : 2);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
         funcs_[i].checkbox = lv_checkbox_create(row);
         lv_checkbox_set_text(funcs_[i].checkbox, "");
-        lv_obj_set_width(funcs_[i].checkbox, 20);
+        lv_obj_set_width(funcs_[i].checkbox, touch ? 44 : 20);
+        lv_obj_set_height(funcs_[i].checkbox, touch ? 44 : 20);
         lv_obj_set_style_text_color(funcs_[i].checkbox, LV_COLOR_MAKE(220, 230, 245), LV_PART_MAIN);
         lv_obj_set_style_bg_opa(funcs_[i].checkbox, LV_OPA_TRANSP, LV_PART_MAIN);
         lv_obj_set_style_border_width(funcs_[i].checkbox, 0, LV_PART_MAIN);
@@ -189,28 +189,44 @@ void GraphApp::ensureUi()
         lv_label_set_text(funcs_[i].color_label, "■");
         ui_theme::applyText14(funcs_[i].color_label);
         lv_obj_set_style_text_color(funcs_[i].color_label, funcs_[i].color, LV_PART_MAIN);
-        lv_obj_set_width(funcs_[i].color_label, 18);
+        lv_obj_set_width(funcs_[i].color_label, touch ? 34 : 18);
 
         funcs_[i].expr_label = lv_label_create(row);
         ui_theme::applyText14(funcs_[i].expr_label);
         lv_obj_set_style_text_color(funcs_[i].expr_label, LV_COLOR_MAKE(230, 236, 246), LV_PART_MAIN);
         lv_obj_set_style_pad_left(funcs_[i].expr_label, 2, LV_PART_MAIN);
         lv_label_set_long_mode(funcs_[i].expr_label, LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_width(funcs_[i].expr_label, kDisplayW - 40);
+        lv_obj_set_width(funcs_[i].expr_label, displayW() - (touch ? 110 : 40));
     }
 
     plot_page_ = lv_obj_create(root_);
     lv_obj_remove_style_all(plot_page_);
-    lv_obj_set_size(plot_page_, kDisplayW, kRootH);
+    lv_obj_set_size(plot_page_, displayW(), rootH());
     lv_obj_clear_flag(plot_page_, LV_OBJ_FLAG_SCROLLABLE);
     ui_theme::applyPage(plot_page_, LV_COLOR_MAKE(8, 10, 18));
 
     plot_area_ = lv_obj_create(plot_page_);
     lv_obj_remove_style_all(plot_area_);
     lv_obj_set_pos(plot_area_, 0, 0);
-    lv_obj_set_size(plot_area_, kDisplayW, kRootH);
+    lv_obj_set_size(plot_area_, displayW(), rootH());
     ui_theme::applyPage(plot_area_, LV_COLOR_MAKE(8, 10, 18));
     lv_obj_clear_flag(plot_area_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(plot_area_, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE));
+    lv_obj_add_flag(plot_area_, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_EVENT_BUBBLE));
+    lv_obj_add_flag(plot_area_, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_GESTURE_BUBBLE));
+    lv_obj_add_event_cb(plot_area_, &GraphApp::onPlotTouchEvent, LV_EVENT_PRESSED, this);
+    lv_obj_add_event_cb(plot_area_, &GraphApp::onPlotTouchEvent, LV_EVENT_PRESSING, this);
+    lv_obj_add_event_cb(plot_area_, &GraphApp::onPlotTouchEvent, LV_EVENT_RELEASED, this);
+    lv_obj_add_event_cb(plot_area_, &GraphApp::onPlotTouchEvent, LV_EVENT_PRESS_LOST, this);
+#if LV_USE_GESTURE_RECOGNITION
+    lv_obj_add_event_cb(plot_area_, &GraphApp::onPlotTouchEvent, LV_EVENT_GESTURE, this);
+    if (lv_indev_t *indev = lv_indev_active()) {
+        lv_indev_set_gesture_min_distance(indev, 8);
+        lv_indev_set_gesture_min_velocity(indev, 1);
+        lv_indev_set_pinch_up_threshold(indev, 1.08f);
+        lv_indev_set_pinch_down_threshold(indev, 0.92f);
+    }
+#endif
 
     axis_x_ = createPlotLine(plot_area_, LV_COLOR_MAKE(70, 84, 110), 1);
     axis_y_ = createPlotLine(plot_area_, LV_COLOR_MAKE(70, 84, 110), 1);
@@ -254,7 +270,7 @@ void GraphApp::ensureUi()
 
     table_page_ = lv_obj_create(root_);
     lv_obj_remove_style_all(table_page_);
-    lv_obj_set_size(table_page_, kDisplayW, kRootH);
+    lv_obj_set_size(table_page_, displayW(), rootH());
     lv_obj_clear_flag(table_page_, LV_OBJ_FLAG_SCROLLABLE);
     ui_theme::applyPage(table_page_, LV_COLOR_MAKE(14, 18, 28));
     lv_obj_set_flex_flow(table_page_, LV_FLEX_FLOW_COLUMN);
@@ -262,7 +278,7 @@ void GraphApp::ensureUi()
     lv_obj_set_style_pad_row(table_page_, 2, LV_PART_MAIN);
 
     table_obj_ = lv_table_create(table_page_);
-    lv_obj_set_width(table_obj_, kDisplayW - 8);
+    lv_obj_set_width(table_obj_, displayW() - 8);
     lv_obj_set_flex_grow(table_obj_, 1);
     ui_theme::applyPanel(table_obj_, LV_COLOR_MAKE(20, 26, 38), LV_COLOR_MAKE(44, 58, 82));
     ui_theme::applyText14(table_obj_);
@@ -282,19 +298,20 @@ void GraphApp::buildMenuOverlay()
 {
     menu_overlay_ = lv_obj_create(root_);
     lv_obj_remove_style_all(menu_overlay_);
-    lv_obj_set_size(menu_overlay_, 224, 112);
+    const bool touch = services_.board().hasTouchInput();
+    lv_obj_set_size(menu_overlay_, touch ? 420 : 224, touch ? 360 : 112);
     lv_obj_align(menu_overlay_, LV_ALIGN_CENTER, 0, 0);
     ui_theme::applyMenuOverlay(menu_overlay_, LV_COLOR_MAKE(22, 28, 42), LV_COLOR_MAKE(64, 80, 110));
     lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
 
     menu_list_ = lv_menu_create(menu_overlay_);
-    lv_obj_set_size(menu_list_, 216, 104);
+    lv_obj_set_size(menu_list_, touch ? 404 : 216, touch ? 344 : 104);
     lv_obj_align(menu_list_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(menu_list_, LV_COLOR_MAKE(22, 28, 42), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(menu_list_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(menu_list_, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(menu_list_, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(menu_list_, touch ? 8 : 2, LV_PART_MAIN);
     lv_obj_set_scrollbar_mode(menu_list_, LV_SCROLLBAR_MODE_AUTO);
     lv_menu_set_mode_header(menu_list_, LV_MENU_HEADER_TOP_FIXED);
     lv_menu_set_mode_root_back_button(menu_list_, LV_MENU_ROOT_BACK_BUTTON_DISABLED);
@@ -308,9 +325,10 @@ void GraphApp::buildEntryOverlay()
 {
     entry_overlay_ = lv_obj_create(root_);
     lv_obj_remove_style_all(entry_overlay_);
-    lv_obj_set_size(entry_overlay_, 232, 54);
+    const bool touch = services_.board().hasTouchInput();
+    lv_obj_set_size(entry_overlay_, touch ? 520 : 232, touch ? 118 : 54);
     lv_obj_align(entry_overlay_, LV_ALIGN_BOTTOM_MID, 0, -2);
-    ui_theme::applyPanel(entry_overlay_, LV_COLOR_MAKE(18, 26, 42), LV_COLOR_MAKE(64, 84, 116), 8, 3, 3);
+    ui_theme::applyPanel(entry_overlay_, LV_COLOR_MAKE(18, 26, 42), LV_COLOR_MAKE(64, 84, 116), 8, touch ? 8 : 3, touch ? 8 : 3);
     lv_obj_set_flex_flow(entry_overlay_, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(entry_overlay_, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(entry_overlay_, LV_OBJ_FLAG_HIDDEN);
@@ -320,14 +338,14 @@ void GraphApp::buildEntryOverlay()
     lv_obj_set_style_text_color(entry_title_, LV_COLOR_MAKE(180, 200, 230), LV_PART_MAIN);
 
     entry_box_ = lv_textarea_create(entry_overlay_);
-    lv_obj_set_size(entry_box_, 224, 24);
+    lv_obj_set_size(entry_box_, touch ? 504 : 224, touch ? 54 : 24);
     lv_textarea_set_one_line(entry_box_, true);
     ui_theme::applyText14(entry_box_);
     lv_obj_set_style_text_color(entry_box_, LV_COLOR_MAKE(240, 242, 246), LV_PART_MAIN);
     lv_obj_set_style_bg_color(entry_box_, LV_COLOR_MAKE(28, 36, 52), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(entry_box_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(entry_box_, 0, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(entry_box_, 2, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(entry_box_, touch ? 8 : 2, LV_PART_MAIN);
     lv_obj_set_style_bg_color(entry_box_, LV_COLOR_MAKE(240, 220, 80), LV_PART_CURSOR | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(entry_box_, LV_OPA_COVER, LV_PART_CURSOR | LV_STATE_DEFAULT);
     lv_obj_add_state(entry_box_, LV_STATE_FOCUSED);
@@ -448,6 +466,13 @@ void GraphApp::releaseUi()
     ui_ready_ = false;
 }
 
+bool GraphApp::handleMenuButton()
+{
+    ensureUi();
+    openPageMenu();
+    return true;
+}
+
 void GraphApp::loadSession()
 {
     if (!ensureStorageMounted()) {
@@ -539,16 +564,16 @@ int GraphApp::xToPlot(float x) const
 {
     if (plot_x_max_ <= plot_x_min_) return 0;
     float ratio = (x - plot_x_min_) / (plot_x_max_ - plot_x_min_);
-    int px = static_cast<int>(ratio * static_cast<float>(kDisplayW - 1));
-    return std::clamp(px, 0, kDisplayW - 1);
+    int px = static_cast<int>(ratio * static_cast<float>(displayW() - 1));
+    return std::clamp(px, 0, displayW() - 1);
 }
 
 int GraphApp::yToPlot(float y) const
 {
-    if (plot_y_max_ <= plot_y_min_) return kRootH / 2;
+    if (plot_y_max_ <= plot_y_min_) return rootH() / 2;
     float ratio = (plot_y_max_ - y) / (plot_y_max_ - plot_y_min_);
-    int py = static_cast<int>(ratio * static_cast<float>(kRootH - 1));
-    return std::clamp(py, 0, kRootH - 1);
+    int py = static_cast<int>(ratio * static_cast<float>(rootH() - 1));
+    return std::clamp(py, 0, rootH() - 1);
 }
 
 float GraphApp::plotXAt(int sample) const
@@ -601,6 +626,16 @@ float GraphApp::niceStep(float range, int max_ticks) const
     return 10.0f * mag;
 }
 
+int GraphApp::displayW() const
+{
+    return services_.board().displayWidth();
+}
+
+int GraphApp::rootH() const
+{
+    return services_.board().displayHeight() - services_.board().statusBarHeight();
+}
+
 void GraphApp::markPlotDirty()
 {
     ++generation_;
@@ -639,7 +674,7 @@ void GraphApp::normalizePlotAspect()
         return;
     }
 
-    const float plot_aspect = static_cast<float>(kDisplayW) / static_cast<float>(kRootH);
+    const float plot_aspect = static_cast<float>(displayW()) / static_cast<float>(rootH());
     const float current_aspect = x_span / y_span;
     const float cx = (plot_x_min_ + plot_x_max_) * 0.5f;
     const float cy = (plot_y_min_ + plot_y_max_) * 0.5f;
@@ -702,6 +737,212 @@ void GraphApp::applyAxisScale(float factor, bool scale_x)
     markPlotDirty();
 }
 
+void GraphApp::panPlotByPixels(int dx, int dy)
+{
+    const int w = std::max(1, displayW());
+    const int h = std::max(1, rootH());
+    const float xr = plot_x_max_ - plot_x_min_;
+    const float yr = plot_y_max_ - plot_y_min_;
+    if (!(xr > 0.0f) || !(yr > 0.0f)) {
+        return;
+    }
+
+    plot_x_min_ -= static_cast<float>(dx) * xr / static_cast<float>(w);
+    plot_x_max_ -= static_cast<float>(dx) * xr / static_cast<float>(w);
+    plot_y_min_ += static_cast<float>(dy) * yr / static_cast<float>(h);
+    plot_y_max_ += static_cast<float>(dy) * yr / static_cast<float>(h);
+    markPlotDirty();
+}
+
+void GraphApp::zoomPlotAt(float factor, int px, int py)
+{
+    factor = std::clamp(factor, 0.2f, 5.0f);
+    const int w = std::max(1, displayW());
+    const int h = std::max(1, rootH());
+    const float xr = plot_x_max_ - plot_x_min_;
+    const float yr = plot_y_max_ - plot_y_min_;
+    if (!(xr > 0.0f) || !(yr > 0.0f)) {
+        return;
+    }
+
+    px = std::clamp(px, 0, w - 1);
+    py = std::clamp(py, 0, h - 1);
+    const float cx = plot_x_min_ + static_cast<float>(px) * xr / static_cast<float>(w);
+    const float cy = plot_y_max_ - static_cast<float>(py) * yr / static_cast<float>(h);
+    plot_x_min_ = cx - (cx - plot_x_min_) * factor;
+    plot_x_max_ = cx + (plot_x_max_ - cx) * factor;
+    plot_y_min_ = cy - (cy - plot_y_min_) * factor;
+    plot_y_max_ = cy + (plot_y_max_ - cy) * factor;
+    markPlotDirty();
+}
+
+void GraphApp::beginPlotTouchPreview()
+{
+    plot_touch_dragging_ = true;
+    plot_touch_pending_ = false;
+    plot_touch_dx_ = 0;
+    plot_touch_dy_ = 0;
+    plot_last_pinch_scale_ = 1.0f;
+    plot_touch_start_x_min_ = plot_x_min_;
+    plot_touch_start_x_max_ = plot_x_max_;
+    plot_touch_start_y_min_ = plot_y_min_;
+    plot_touch_start_y_max_ = plot_y_max_;
+    plot_touch_pending_x_min_ = plot_x_min_;
+    plot_touch_pending_x_max_ = plot_x_max_;
+    plot_touch_pending_y_min_ = plot_y_min_;
+    plot_touch_pending_y_max_ = plot_y_max_;
+    showPlotTouchPreview("Touch plot");
+}
+
+void GraphApp::updatePlotTouchPanPreview(int dx, int dy)
+{
+    const int w = std::max(1, displayW());
+    const int h = std::max(1, rootH());
+    const float xr = plot_touch_start_x_max_ - plot_touch_start_x_min_;
+    const float yr = plot_touch_start_y_max_ - plot_touch_start_y_min_;
+    if (!(xr > 0.0f) || !(yr > 0.0f)) {
+        return;
+    }
+
+    plot_touch_dx_ += dx;
+    plot_touch_dy_ += dy;
+    plot_touch_pending_x_min_ = plot_touch_start_x_min_ - static_cast<float>(plot_touch_dx_) * xr / static_cast<float>(w);
+    plot_touch_pending_x_max_ = plot_touch_start_x_max_ - static_cast<float>(plot_touch_dx_) * xr / static_cast<float>(w);
+    plot_touch_pending_y_min_ = plot_touch_start_y_min_ + static_cast<float>(plot_touch_dy_) * yr / static_cast<float>(h);
+    plot_touch_pending_y_max_ = plot_touch_start_y_max_ + static_cast<float>(plot_touch_dy_) * yr / static_cast<float>(h);
+    plot_touch_pending_ = true;
+    showPlotTouchPreview("Pan");
+}
+
+void GraphApp::updatePlotTouchZoomPreview(float scale, int px, int py)
+{
+    if (!std::isfinite(scale) || !(scale > 0.01f)) {
+        return;
+    }
+
+    const int w = std::max(1, displayW());
+    const int h = std::max(1, rootH());
+    const float xr = plot_touch_start_x_max_ - plot_touch_start_x_min_;
+    const float yr = plot_touch_start_y_max_ - plot_touch_start_y_min_;
+    if (!(xr > 0.0f) || !(yr > 0.0f)) {
+        return;
+    }
+
+    px = std::clamp(px, 0, w - 1);
+    py = std::clamp(py, 0, h - 1);
+    const float factor = std::clamp(1.0f / scale, 0.2f, 5.0f);
+    const float cx = plot_touch_start_x_min_ + static_cast<float>(px) * xr / static_cast<float>(w);
+    const float cy = plot_touch_start_y_max_ - static_cast<float>(py) * yr / static_cast<float>(h);
+    plot_touch_pending_x_min_ = cx - (cx - plot_touch_start_x_min_) * factor;
+    plot_touch_pending_x_max_ = cx + (plot_touch_start_x_max_ - cx) * factor;
+    plot_touch_pending_y_min_ = cy - (cy - plot_touch_start_y_min_) * factor;
+    plot_touch_pending_y_max_ = cy + (plot_touch_start_y_max_ - cy) * factor;
+    plot_touch_pending_ = true;
+    showPlotTouchPreview(scale >= 1.0f ? "Zoom in" : "Zoom out");
+}
+
+void GraphApp::finishPlotTouchPreview(bool commit)
+{
+    if (commit && plot_touch_pending_) {
+        plot_x_min_ = plot_touch_pending_x_min_;
+        plot_x_max_ = plot_touch_pending_x_max_;
+        plot_y_min_ = plot_touch_pending_y_min_;
+        plot_y_max_ = plot_touch_pending_y_max_;
+        markPlotDirty();
+    }
+    plot_touch_dragging_ = false;
+    plot_touch_pending_ = false;
+    plot_last_pinch_scale_ = 1.0f;
+    if (cursor_info_label_ != nullptr && !cursor_mode_) {
+        lv_obj_add_flag(cursor_info_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void GraphApp::showPlotTouchPreview(const char *action)
+{
+    if (cursor_info_label_ == nullptr) {
+        return;
+    }
+    std::snprintf(cursor_info_buf_.data(),
+                  cursor_info_buf_.size(),
+                  "%s dx=%d dy=%d\nx %.3g..%.3g  y %.3g..%.3g",
+                  action != nullptr ? action : "Touch",
+                  plot_touch_dx_,
+                  plot_touch_dy_,
+                  static_cast<double>(plot_touch_pending_x_min_),
+                  static_cast<double>(plot_touch_pending_x_max_),
+                  static_cast<double>(plot_touch_pending_y_min_),
+                  static_cast<double>(plot_touch_pending_y_max_));
+    lv_label_set_text(cursor_info_label_, cursor_info_buf_.data());
+    lv_obj_clear_flag(cursor_info_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(cursor_info_label_);
+}
+
+void GraphApp::onPlotTouchEvent(lv_event_t *e)
+{
+    auto *self = static_cast<GraphApp *>(lv_event_get_user_data(e));
+    if (self == nullptr || self->plot_area_ == nullptr) {
+        return;
+    }
+
+    const lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_PRESSED) {
+        self->beginPlotTouchPreview();
+        return;
+    }
+    if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        self->finishPlotTouchPreview(code == LV_EVENT_RELEASED);
+        return;
+    }
+
+    lv_indev_t *indev = lv_event_get_indev(e);
+    if (indev == nullptr) {
+        return;
+    }
+
+#if LV_USE_GESTURE_RECOGNITION
+    if (!self->plot_touch_gesture_configured_) {
+        lv_indev_set_gesture_min_distance(indev, 8);
+        lv_indev_set_gesture_min_velocity(indev, 1);
+        lv_indev_set_pinch_up_threshold(indev, 1.08f);
+        lv_indev_set_pinch_down_threshold(indev, 0.92f);
+        self->plot_touch_gesture_configured_ = true;
+    }
+#endif
+
+#if LV_USE_GESTURE_RECOGNITION
+    if (code == LV_EVENT_GESTURE) {
+        const lv_indev_gesture_type_t gesture_type = lv_event_get_gesture_type(e);
+        if (gesture_type == LV_INDEV_GESTURE_PINCH) {
+            const lv_indev_gesture_state_t state = lv_event_get_gesture_state(e, LV_INDEV_GESTURE_PINCH);
+            const float scale = lv_event_get_pinch_scale(e);
+            if (state == LV_INDEV_GESTURE_STATE_ENDED) {
+                self->finishPlotTouchPreview(true);
+                return;
+            }
+            if (std::isfinite(scale) && scale > 0.01f) {
+                lv_point_t point{};
+                lv_indev_get_point(indev, &point);
+                if (std::fabs(scale - self->plot_last_pinch_scale_) > 0.01f || !self->plot_touch_pending_) {
+                    self->updatePlotTouchZoomPreview(scale, point.x, point.y);
+                    self->plot_last_pinch_scale_ = scale;
+                }
+            }
+            return;
+        }
+    }
+#endif
+
+    if (code == LV_EVENT_PRESSING && self->plot_touch_dragging_) {
+        lv_point_t vect{};
+        lv_indev_get_vect(indev, &vect);
+        if (vect.x != 0 || vect.y != 0) {
+            self->updatePlotTouchPanPreview(vect.x, vect.y);
+        }
+        return;
+    }
+}
+
 void GraphApp::startRegionZoom()
 {
     region_zoom_active_ = true;
@@ -734,7 +975,7 @@ void GraphApp::finishRegionZoom()
     plot_x_max_ = x1;
 
     if (plot_equal_scale_) {
-        const float plot_aspect = static_cast<float>(kDisplayW) / static_cast<float>(kRootH);
+        const float plot_aspect = static_cast<float>(displayW()) / static_cast<float>(rootH());
         const float half_x = x_span * 0.5f;
         const float new_half_y = half_x / plot_aspect;
         plot_y_min_ = y_center - new_half_y;
@@ -892,7 +1133,7 @@ void GraphApp::rebuildPlotSegments(int func_index)
     for (int i = 0; i < kPlotSamples; ++i) {
         func.points[i].x = static_cast<lv_value_precise_t>(xToPlot(plotXAt(i)));
         if (!std::isfinite(values[i])) {
-            func.points[i].y = static_cast<lv_value_precise_t>(kRootH + 10);
+            func.points[i].y = static_cast<lv_value_precise_t>(rootH() + 10);
         } else {
             func.points[i].y = static_cast<lv_value_precise_t>(yToPlot(values[i]));
         }
@@ -930,7 +1171,7 @@ void GraphApp::rebuildPlotSegments(int func_index)
         bool break_segment = !finite;
         if (finite && i > 0 && std::isfinite(values[i - 1])) {
             const float dy = std::fabs(func.points[i].y - func.points[i - 1].y);
-            if (dy > static_cast<float>(kRootH) * 0.72f) {
+            if (dy > static_cast<float>(rootH()) * 0.72f) {
                 break_segment = true;
             }
         }
@@ -956,13 +1197,13 @@ void GraphApp::rebuildPlotTickLabels()
     const float x_step = niceStep(plot_x_max_ - plot_x_min_, kMaxTicks);
     const float y_step = niceStep(plot_y_max_ - plot_y_min_, kMaxTicks);
 
-    int axis_y = (plot_y_min_ < 0.0f && plot_y_max_ > 0.0f) ? yToPlot(0.0f) : (kRootH - 1);
+    int axis_y = (plot_y_min_ < 0.0f && plot_y_max_ > 0.0f) ? yToPlot(0.0f) : (rootH() - 1);
     int axis_x = (plot_x_min_ < 0.0f && plot_x_max_ > 0.0f) ? xToPlot(0.0f) : 0;
 
     axis_x_pts_[0] = {0, static_cast<lv_value_precise_t>(axis_y)};
-    axis_x_pts_[1] = {kDisplayW - 1, static_cast<lv_value_precise_t>(axis_y)};
+    axis_x_pts_[1] = {static_cast<lv_value_precise_t>(displayW() - 1), static_cast<lv_value_precise_t>(axis_y)};
     axis_y_pts_[0] = {static_cast<lv_value_precise_t>(axis_x), 0};
-    axis_y_pts_[1] = {static_cast<lv_value_precise_t>(axis_x), kRootH - 1};
+    axis_y_pts_[1] = {static_cast<lv_value_precise_t>(axis_x), static_cast<lv_value_precise_t>(rootH() - 1)};
     if (axis_x_) lv_line_set_points(axis_x_, axis_x_pts_.data(), 2);
     if (axis_y_) lv_line_set_points(axis_y_, axis_y_pts_.data(), 2);
 
@@ -990,12 +1231,17 @@ void GraphApp::rebuildPlotTickLabels()
         }
 
         values.reserve(kMaxTicks);
+        float last = std::numeric_limits<float>::quiet_NaN();
         for (int i = 0; i < kMaxTicks; ++i) {
             const float t = (kMaxTicks > 1)
                                 ? static_cast<float>(i) / static_cast<float>(kMaxTicks - 1)
                                 : 0.0f;
             const int sample_idx = static_cast<int>(std::round(t * static_cast<float>(total - 1)));
-            values.push_back(start + static_cast<float>(sample_idx) * step);
+            const float value = start + static_cast<float>(sample_idx) * step;
+            if (values.empty() || std::fabs(value - last) > step * 0.25f) {
+                values.push_back(value);
+                last = value;
+            }
         }
         return values;
     };
@@ -1007,8 +1253,10 @@ void GraphApp::rebuildPlotTickLabels()
             break;
         }
         int px = xToPlot(x);
-        tick_pts_x_[idx][0] = {static_cast<lv_value_precise_t>(px), static_cast<lv_value_precise_t>(axis_y - 3)};
-        tick_pts_x_[idx][1] = {static_cast<lv_value_precise_t>(px), static_cast<lv_value_precise_t>(axis_y + 3)};
+        const int tick_top = clampCoord(axis_y - 3, rootH() - 1);
+        const int tick_bottom = clampCoord(axis_y + 3, rootH() - 1);
+        tick_pts_x_[idx][0] = {static_cast<lv_value_precise_t>(px), static_cast<lv_value_precise_t>(tick_top)};
+        tick_pts_x_[idx][1] = {static_cast<lv_value_precise_t>(px), static_cast<lv_value_precise_t>(tick_bottom)};
         if (x_tick_lines_[idx]) {
             lv_line_set_points(x_tick_lines_[idx], tick_pts_x_[idx].data(), 2);
             lv_obj_clear_flag(x_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
@@ -1017,8 +1265,12 @@ void GraphApp::rebuildPlotTickLabels()
         std::snprintf(buf, sizeof(buf), "%.2g", static_cast<double>(x));
         if (x_tick_labels_[idx]) {
             lv_label_set_text(x_tick_labels_[idx], buf);
-            const int label_x = std::clamp(px - 12, 0, kDisplayW - 26);
-            const int label_y = std::clamp(axis_y + 4, 0, kRootH - 14);
+            const lv_point_t label_size = measureLabel(x_tick_labels_[idx], buf);
+            const int label_x = clampCoord(px - static_cast<int>(label_size.x) / 2, displayW() - static_cast<int>(label_size.x));
+            const int below_y = axis_y + 5;
+            const int above_y = axis_y - static_cast<int>(label_size.y) - 5;
+            const int label_y = clampCoord((below_y + label_size.y <= rootH()) ? below_y : above_y,
+                                           rootH() - static_cast<int>(label_size.y));
             lv_obj_set_pos(x_tick_labels_[idx], label_x, label_y);
             lv_obj_clear_flag(x_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
         }
@@ -1036,8 +1288,10 @@ void GraphApp::rebuildPlotTickLabels()
             break;
         }
         int py = yToPlot(y);
-        tick_pts_y_[idx][0] = {static_cast<lv_value_precise_t>(axis_x - 3), static_cast<lv_value_precise_t>(py)};
-        tick_pts_y_[idx][1] = {static_cast<lv_value_precise_t>(axis_x + 3), static_cast<lv_value_precise_t>(py)};
+        const int tick_left = clampCoord(axis_x - 3, displayW() - 1);
+        const int tick_right = clampCoord(axis_x + 3, displayW() - 1);
+        tick_pts_y_[idx][0] = {static_cast<lv_value_precise_t>(tick_left), static_cast<lv_value_precise_t>(py)};
+        tick_pts_y_[idx][1] = {static_cast<lv_value_precise_t>(tick_right), static_cast<lv_value_precise_t>(py)};
         if (y_tick_lines_[idx]) {
             lv_line_set_points(y_tick_lines_[idx], tick_pts_y_[idx].data(), 2);
             lv_obj_clear_flag(y_tick_lines_[idx], LV_OBJ_FLAG_HIDDEN);
@@ -1046,8 +1300,13 @@ void GraphApp::rebuildPlotTickLabels()
         std::snprintf(buf, sizeof(buf), "%.2g", static_cast<double>(y));
         if (y_tick_labels_[idx]) {
             lv_label_set_text(y_tick_labels_[idx], buf);
-            const int label_x = std::clamp(axis_x + 4, 0, kDisplayW - 30);
-            const int label_y = std::clamp(py - 8, 0, kRootH - 14);
+            const lv_point_t label_size = measureLabel(y_tick_labels_[idx], buf);
+            const int right_x = axis_x + 5;
+            const int left_x = axis_x - static_cast<int>(label_size.x) - 5;
+            const int label_x = clampCoord((right_x + label_size.x <= displayW()) ? right_x : left_x,
+                                           displayW() - static_cast<int>(label_size.x));
+            const int label_y = clampCoord(py - static_cast<int>(label_size.y) / 2,
+                                           rootH() - static_cast<int>(label_size.y));
             lv_obj_set_pos(y_tick_labels_[idx], label_x, label_y);
             lv_obj_clear_flag(y_tick_labels_[idx], LV_OBJ_FLAG_HIDDEN);
         }
@@ -1287,20 +1546,21 @@ void GraphApp::updateMenuOverlay()
             continue;
         }
         menu_rows_.push_back(btn);
-        lv_obj_set_width(btn, 206);
-        lv_obj_set_height(btn, 22);
+        const bool touch = services_.board().hasTouchInput();
+        lv_obj_set_width(btn, touch ? 380 : 206);
+        lv_obj_set_height(btn, touch ? 48 : 22);
         lv_obj_t *label = lv_label_create(btn);
         lv_label_set_text(label, item.label);
-        lv_obj_set_width(label, 198);
+        lv_obj_set_width(label, touch ? 360 : 198);
         lv_label_set_long_mode(label, LV_LABEL_LONG_SCROLL_CIRCULAR);
         ui_theme::applyText14(btn);
         ui_theme::applyText14(label);
         lv_obj_set_style_text_color(btn, LV_COLOR_MAKE(220, 230, 245), LV_PART_MAIN);
         lv_obj_set_style_text_color(label, LV_COLOR_MAKE(220, 230, 245), LV_PART_MAIN);
-        lv_obj_set_style_pad_left(btn, 4, LV_PART_MAIN);
-        lv_obj_set_style_pad_right(btn, 4, LV_PART_MAIN);
-        lv_obj_set_style_pad_top(btn, 1, LV_PART_MAIN);
-        lv_obj_set_style_pad_bottom(btn, 1, LV_PART_MAIN);
+        lv_obj_set_style_pad_left(btn, touch ? 12 : 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_right(btn, touch ? 12 : 4, LV_PART_MAIN);
+        lv_obj_set_style_pad_top(btn, touch ? 8 : 1, LV_PART_MAIN);
+        lv_obj_set_style_pad_bottom(btn, touch ? 8 : 1, LV_PART_MAIN);
         lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_user_data(btn, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
         lv_obj_add_event_cb(btn, &GraphApp::onMenuButtonEvent, LV_EVENT_FOCUSED, this);
@@ -1467,7 +1727,10 @@ void GraphApp::startEntry(EntryKind kind, int func_index)
 void GraphApp::finishEntry(bool confirm)
 {
     if (confirm && entry_kind_ != EntryKind::None) {
-        const char *text = entry_buffer_;
+        const char *text = entry_box_ != nullptr ? lv_textarea_get_text(entry_box_) : entry_buffer_;
+        if (text == nullptr) {
+            text = "";
+        }
         if (entry_kind_ == EntryKind::FunctionExpr && entry_func_index_ >= 0 && entry_func_index_ < kMaxFuncs) {
             std::strncpy(funcs_[entry_func_index_].expr, text, kMaxExprLen - 1);
             funcs_[entry_func_index_].expr[kMaxExprLen - 1] = '\0';
@@ -1553,232 +1816,6 @@ void GraphApp::buildPlotPage()
 void GraphApp::buildTablePage()
 {
     updateTablePage();
-}
-
-void GraphApp::handleMenuInput(uint64_t newly)
-{
-    const uint64_t cancel = (1ULL << 13);
-    if ((newly & cancel) != 0U || (newly & kFnBit) != 0U) {
-        closeMenu();
-        return;
-    }
-
-    if (menu_group_ == nullptr) {
-        return;
-    }
-
-    const uint64_t up = (1ULL << 39);
-    const uint64_t down = (1ULL << 53);
-    const uint64_t enter = (1ULL << 41);
-
-    if ((newly & up) != 0U) {
-        lv_group_focus_prev(menu_group_);
-    }
-    if ((newly & down) != 0U) {
-        lv_group_focus_next(menu_group_);
-    }
-    if ((newly & enter) != 0U) {
-        lv_group_send_data(menu_group_, LV_KEY_ENTER);
-    }
-}
-
-void GraphApp::handleEntryInput(uint64_t newly, uint64_t current_mask)
-{
-    if (entry_kind_ == EntryKind::None) return;
-
-    const uint64_t enter = (1ULL << 41);
-    const uint64_t backspace = (1ULL << 13);
-    const uint64_t cancel = (1ULL << 0);
-
-    if ((newly & enter) != 0U) {
-        finishEntry(true);
-        return;
-    }
-    if ((newly & cancel) != 0U) {
-        finishEntry(false);
-        return;
-    }
-    if ((newly & kShiftBit) != 0U) {
-        entry_shift_lock_ = !entry_shift_lock_;
-    }
-    if ((newly & backspace) != 0U) {
-        if (entry_length_ > 0) entry_buffer_[--entry_length_] = '\0';
-        updateEntryOverlay();
-        return;
-    }
-
-    for (int row = 0; row < 4; ++row) {
-        for (int col = 0; col < 14; ++col) {
-            uint64_t bit = 1ULL << (row * 14 + col);
-            if ((newly & bit) == 0U) continue;
-            if (row == 2 && col == 0) continue;
-            if (row == 2 && col == 1) continue;
-            const bool shift = ((current_mask & kShiftBit) != 0U) || entry_shift_lock_;
-            const char ch = shift ? kKeyMap[row][col].shifted : kKeyMap[row][col].base;
-            if (ch == 0) continue;
-            if (entry_length_ < static_cast<int>(sizeof(entry_buffer_)) - 1) {
-                entry_buffer_[entry_length_++] = ch;
-                entry_buffer_[entry_length_] = '\0';
-                updateEntryOverlay();
-            }
-        }
-    }
-}
-
-void GraphApp::handleInputPageInput(uint64_t newly, uint64_t current_mask)
-{
-    (void)current_mask;
-    const uint64_t enter = (1ULL << 41);
-    const uint64_t space = kSpaceBit;
-    const uint64_t cancel = (1ULL << 13);
-    const uint64_t left = (1ULL << 52);
-    const uint64_t right = (1ULL << 54);
-    const uint64_t up = (1ULL << 39);
-    const uint64_t down = (1ULL << 53);
-
-    if ((newly & up) != 0U && selected_func_ > 0) {
-        selectFunction(selected_func_ - 1);
-    }
-    if ((newly & down) != 0U && selected_func_ + 1 < kMaxFuncs) {
-        selectFunction(selected_func_ + 1);
-    }
-    if ((newly & space) != 0U) {
-        toggleFunction(selected_func_);
-    }
-    if ((newly & enter) != 0U) {
-        startEntry(EntryKind::FunctionExpr, selected_func_);
-    }
-    if ((newly & left) != 0U) {
-        cycleFunctionColor(selected_func_);
-    }
-    if ((newly & right) != 0U) {
-        cycleFunctionColor(selected_func_);
-    }
-    if ((newly & cancel) != 0U) {
-        showPage(Page::Plot);
-    }
-}
-
-void GraphApp::handlePlotPageInput(uint64_t newly, uint64_t current_mask)
-{
-    (void)current_mask;
-    const uint64_t enter = (1ULL << 41);
-    const uint64_t cancel = (1ULL << 13);
-    const uint64_t left = (1ULL << 52);
-    const uint64_t right = (1ULL << 54);
-    const uint64_t up = (1ULL << 39);
-    const uint64_t down = (1ULL << 53);
-    const uint64_t z = (1ULL << 45);
-    const uint64_t d = (1ULL << 32);
-    const uint64_t x = (1ULL << (17 + 1));
-    const uint64_t i = (1ULL << 8);
-    const uint64_t r = (1ULL << 17);
-
-    if (region_zoom_active_) {
-        if ((newly & cancel) != 0U) {
-            region_zoom_active_ = false;
-            region_zoom_anchor_set_ = false;
-            return;
-        }
-        if ((newly & enter) != 0U) {
-            if (!region_zoom_anchor_set_) {
-                region_zoom_anchor_sample_ = cursor_sample_;
-                region_zoom_anchor_set_ = true;
-            } else {
-                finishRegionZoom();
-            }
-            return;
-        }
-    }
-
-    if ((newly & enter) != 0U) {
-        if (cursor_mode_) {
-            cursor_mode_ = false;
-        } else {
-            cursor_mode_ = true;
-        }
-        return;
-    }
-
-    if (!cursor_mode_) {
-        const float xr = plot_x_max_ - plot_x_min_;
-        const float yr = plot_y_max_ - plot_y_min_;
-        if ((newly & left) != 0U) { plot_x_min_ -= xr * 0.12f; plot_x_max_ -= xr * 0.12f; markPlotDirty(); }
-        if ((newly & right) != 0U) { plot_x_min_ += xr * 0.12f; plot_x_max_ += xr * 0.12f; markPlotDirty(); }
-        if ((newly & up) != 0U) { const float cx = (plot_x_min_ + plot_x_max_) * 0.5f; const float cy = (plot_y_min_ + plot_y_max_) * 0.5f; plot_x_min_ = cx - xr * 0.35f; plot_x_max_ = cx + xr * 0.35f; plot_y_min_ = cy - yr * 0.35f; plot_y_max_ = cy + yr * 0.35f; markPlotDirty(); }
-        if ((newly & down) != 0U) { const float cx = (plot_x_min_ + plot_x_max_) * 0.5f; const float cy = (plot_y_min_ + plot_y_max_) * 0.5f; plot_x_min_ = cx - xr * 0.75f; plot_x_max_ = cx + xr * 0.75f; plot_y_min_ = cy - yr * 0.75f; plot_y_max_ = cy + yr * 0.75f; markPlotDirty(); }
-        if ((newly & r) != 0U) { plot_x_min_ = -6.0f; plot_x_max_ = 6.0f; plot_y_min_ = -4.0f; plot_y_max_ = 4.0f; markPlotDirty(); }
-    } else {
-        if ((newly & left) != 0U && cursor_sample_ > 0) --cursor_sample_;
-        if ((newly & right) != 0U && cursor_sample_ + 1 < kPlotSamples) ++cursor_sample_;
-        if ((newly & up) != 0U) {
-            for (int step = 1; step <= kMaxFuncs; ++step) {
-                int idx = (active_plot_func_ + kMaxFuncs - step) % kMaxFuncs;
-                if (funcs_[idx].enabled) { active_plot_func_ = idx; break; }
-            }
-        }
-        if ((newly & down) != 0U) {
-            for (int step = 1; step <= kMaxFuncs; ++step) {
-                int idx = (active_plot_func_ + step) % kMaxFuncs;
-                if (funcs_[idx].enabled) { active_plot_func_ = idx; break; }
-            }
-        }
-        if ((newly & z) != 0U && funcs_[active_plot_func_].enabled) {
-            char expr[256];
-            std::snprintf(expr, sizeof(expr), "solve(%s=0,x)", funcs_[active_plot_func_].expr);
-            if (services_.casService().submit(expr)) {
-                pending_kind_ = EvalKind::None;
-            }
-        }
-        if ((newly & d) != 0U && funcs_[active_plot_func_].enabled) {
-            char expr[256];
-            const float x0 = plotXAt(cursor_sample_);
-            std::snprintf(expr, sizeof(expr), "evalf(subst(diff(%s,x),x,%.8f))", funcs_[active_plot_func_].expr, static_cast<double>(x0));
-            if (services_.casService().submit(expr)) {
-                pending_kind_ = EvalKind::None;
-            }
-        }
-        if ((newly & x) != 0U && funcs_[active_plot_func_].enabled) {
-            for (int step = 1; step <= kMaxFuncs; ++step) {
-                int idx = (active_plot_func_ + step) % kMaxFuncs;
-                if (funcs_[idx].enabled) {
-                    char expr[256];
-                    std::snprintf(expr, sizeof(expr), "solve(%s=%s,x)", funcs_[active_plot_func_].expr, funcs_[idx].expr);
-                    services_.casService().submit(expr);
-                    break;
-                }
-            }
-        }
-        if ((newly & i) != 0U && funcs_[active_plot_func_].enabled) {
-            if (table_step_ > 0.0f) {
-                // use table page style integral: choose bounds on plot page
-            }
-        }
-    }
-}
-
-void GraphApp::handleTablePageInput(uint64_t newly, uint64_t current_mask)
-{
-    (void)current_mask;
-    const uint64_t left = (1ULL << 52);
-    const uint64_t right = (1ULL << 54);
-    const uint64_t up = (1ULL << 39);
-    const uint64_t down = (1ULL << 53);
-
-    if (table_obj_ == nullptr) return;
-
-    if ((newly & left) != 0U) {
-        lv_obj_scroll_by_bounded(table_obj_, -34, 0, LV_ANIM_ON);
-    }
-    if ((newly & right) != 0U) {
-        lv_obj_scroll_by_bounded(table_obj_, 34, 0, LV_ANIM_ON);
-    }
-    if ((newly & up) != 0U) {
-        lv_obj_scroll_by_bounded(table_obj_, 0, -18, LV_ANIM_ON);
-    }
-    if ((newly & down) != 0U) {
-        lv_obj_scroll_by_bounded(table_obj_, 0, 18, LV_ANIM_ON);
-    }
 }
 
 void GraphApp::handleEntryMappedKey(uint32_t key)
@@ -1905,39 +1942,6 @@ void GraphApp::handleTablePageMappedKey(uint32_t key)
     }
 }
 
-void GraphApp::handleKeyboardState(uint64_t pressedMask)
-{
-    ensureUi();
-    const uint64_t newly = pressedMask & ~prev_mask_;
-    prev_mask_ = pressedMask;
-
-    if (menu_open_) {
-        handleMenuInput(newly);
-        return;
-    }
-    if (entry_kind_ != EntryKind::None) {
-        handleEntryInput(newly, pressedMask);
-        return;
-    }
-
-    if ((newly & kTabBit) != 0U) {
-        if (page_ == Page::Input) {
-            showPage(Page::Plot);
-        } else if (page_ == Page::Plot) {
-            showPage(Page::Table);
-        } else {
-            showPage(Page::Input);
-        }
-        return;
-    }
-
-    switch (page_) {
-    case Page::Input: handleInputPageInput(newly, pressedMask); break;
-    case Page::Plot: handlePlotPageInput(newly, pressedMask); break;
-    case Page::Table: handleTablePageInput(newly, pressedMask); break;
-    }
-}
-
 void GraphApp::openPageMenu()
 {
     switch (page_) {
@@ -2004,17 +2008,17 @@ void GraphApp::render()
 
     scheduleNextEvaluation();
     if (page_ == Page::Plot && cursor_mode_ && cursor_line_) {
-        const float px = static_cast<float>(cursor_sample_) * static_cast<float>(kDisplayW - 1) / static_cast<float>(kPlotSamples - 1);
+        const float px = static_cast<float>(cursor_sample_) * static_cast<float>(displayW() - 1) / static_cast<float>(kPlotSamples - 1);
         const float x = plotXAt(cursor_sample_);
         const float y = cursorYValue();
         cursor_pts_[0] = {static_cast<lv_value_precise_t>(px), 0};
-        cursor_pts_[1] = {static_cast<lv_value_precise_t>(px), kRootH - 1};
+        cursor_pts_[1] = {static_cast<lv_value_precise_t>(px), static_cast<lv_value_precise_t>(rootH() - 1)};
         lv_line_set_points(cursor_line_, cursor_pts_.data(), 2);
         lv_obj_clear_flag(cursor_line_, LV_OBJ_FLAG_HIDDEN);
         if (cursor_h_line_ != nullptr && std::isfinite(y)) {
             const int py = yToPlot(y);
             cursor_h_pts_[0] = {0, static_cast<lv_value_precise_t>(py)};
-            cursor_h_pts_[1] = {kDisplayW - 1, static_cast<lv_value_precise_t>(py)};
+            cursor_h_pts_[1] = {static_cast<lv_value_precise_t>(displayW() - 1), static_cast<lv_value_precise_t>(py)};
             lv_line_set_points(cursor_h_line_, cursor_h_pts_.data(), 2);
             lv_obj_clear_flag(cursor_h_line_, LV_OBJ_FLAG_HIDDEN);
         } else if (cursor_h_line_ != nullptr) {
@@ -2033,7 +2037,7 @@ void GraphApp::render()
     } else if (cursor_line_) {
         lv_obj_add_flag(cursor_line_, LV_OBJ_FLAG_HIDDEN);
         if (cursor_h_line_) lv_obj_add_flag(cursor_h_line_, LV_OBJ_FLAG_HIDDEN);
-        if (cursor_info_label_) lv_obj_add_flag(cursor_info_label_, LV_OBJ_FLAG_HIDDEN);
+        if (cursor_info_label_ && !plot_touch_dragging_) lv_obj_add_flag(cursor_info_label_, LV_OBJ_FLAG_HIDDEN);
     }
 }
 

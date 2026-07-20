@@ -1,5 +1,7 @@
 #include "mathlayout/font/font_metrics.hpp"
 
+#include "brookesia/core/ui_fonts.hpp"
+
 namespace xcas::mathlayout
 {
 
@@ -65,7 +67,8 @@ bool LvglFontMetrics::hasGlyph(const uint32_t codepoint) const
 
 const lv_font_t *defaultMathFont()
 {
-    return &lv_font_noto_math_14;
+    const lv_font_t *font = brookesia::ui_fonts::textFont16();
+    return (font != nullptr) ? font : &lv_font_noto_math_14;
 }
 
 } // namespace xcas::mathlayout

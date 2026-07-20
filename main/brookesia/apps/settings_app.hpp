@@ -23,7 +23,6 @@ public:
     void onFocus() override;
     void onBlur() override;
     void releaseUi() override;
-    void handleKeyboardState(uint64_t pressedMask) override;
     void handleMappedKey(uint32_t key) override;
     void render() override;
 
@@ -43,6 +42,7 @@ private:
         StatusBarPage,
         Angle,
         Precision,
+        FormulaPreviewMode,
         FnSwitch,
         WifiPage,
         BtPage,
@@ -79,7 +79,7 @@ private:
         bool disabled = false;
     };
 
-    static constexpr int kMaxMenuEntries = 29;
+    static constexpr int kMaxMenuEntries = 30;
 
     void ensureUi();
     void refreshMenu();
@@ -115,6 +115,7 @@ private:
     void ensureSelectionOnPage();
     static void menuEntryEventCb(lv_event_t *e);
 
+    ServiceHub &services_;
     xcas::XcasService &cas_;
 
     lv_obj_t *root_ = nullptr;
@@ -133,6 +134,7 @@ private:
     Item selected_item_ = Item::Angle;
     int angle_index_ = 0;  // 0 = RAD, 1 = DEG
     int digits_index_ = 0; // index into digits table
+    int formula_preview_mode_ = 0;
     bool fn_app_switch_enabled_ = false;
     bool wifi_enabled_ = false;
     bool bt_hid_enabled_ = false;
@@ -156,7 +158,6 @@ private:
     std::array<char, 48> wifi_state_text_{};
     std::array<char, 48> bt_state_text_{};
     std::array<char, 48> sd_state_text_{};
-    uint64_t prev_mask_ = 0;
     uint32_t last_about_ms_ = 0;
     bool ui_ready_ = false;
 };

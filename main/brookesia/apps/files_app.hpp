@@ -19,7 +19,6 @@ public:
     void onBlur() override;
     void releaseUi() override;
     bool handleMenuButton() override;
-    void handleKeyboardState(uint64_t pressedMask) override;
     void handleMappedKey(uint32_t key) override;
     void render() override;
 
@@ -75,7 +74,6 @@ private:
     Action pending_name_action_ = Action::NewFile;
     Mode mode_ = Mode::Browser;
     int selected_ = 0;
-    uint64_t prev_mask_ = 0;
     bool ui_ready_ = false;
     bool mounted_ = false;
     bool actions_visible_ = false;

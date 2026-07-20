@@ -26,9 +26,9 @@ void CalcApp::releaseUi()
     ui_.releaseUi();
 }
 
-void CalcApp::handleKeyboardState(uint64_t pressedMask)
+bool CalcApp::handleKeyboardToggle()
 {
-    ui_.handleKeyboardState(pressedMask);
+    return ui_.toggleScreenKeyboard();
 }
 
 void CalcApp::handleMappedKey(uint32_t key)

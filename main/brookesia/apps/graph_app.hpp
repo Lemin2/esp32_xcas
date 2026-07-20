@@ -20,16 +20,11 @@ public:
     void onFocus() override;
     void onBlur() override;
     void releaseUi() override;
-    void handleKeyboardState(uint64_t pressedMask) override;
+    bool handleMenuButton() override;
     void handleMappedKey(uint32_t key) override;
     void render() override;
 
 private:
-    static constexpr int kDisplayW = 240;
-    static constexpr int kDisplayH = 135;
-    static constexpr int kStatusH = 16;
-    static constexpr int kRootH = kDisplayH - kStatusH;
-
     static constexpr int kMaxFuncs = 4;
     static constexpr int kMaxExprLen = 96;
     static constexpr int kPlotSamples = 220;
@@ -90,6 +85,13 @@ private:
     void normalizePlotAspect();
     void applyUniformScale(float factor);
     void applyAxisScale(float factor, bool scale_x);
+    void panPlotByPixels(int dx, int dy);
+    void zoomPlotAt(float factor, int px, int py);
+    void beginPlotTouchPreview();
+    void updatePlotTouchPanPreview(int dx, int dy);
+    void updatePlotTouchZoomPreview(float scale, int px, int py);
+    void finishPlotTouchPreview(bool commit);
+    void showPlotTouchPreview(const char *action);
     void startRegionZoom();
     void finishRegionZoom();
     void scheduleNextEvaluation();
@@ -126,17 +128,15 @@ private:
     float finiteFallbackY() const;
     float computeDerivative(int func_index, int sample) const;
     float niceStep(float range, int max_ticks) const;
+    int displayW() const;
+    int rootH() const;
 
-    void handleMenuInput(uint64_t newly);
-    void handleEntryInput(uint64_t newly, uint64_t current_mask);
-    void handleInputPageInput(uint64_t newly, uint64_t current_mask);
-    void handlePlotPageInput(uint64_t newly, uint64_t current_mask);
-    void handleTablePageInput(uint64_t newly, uint64_t current_mask);
     void handleEntryMappedKey(uint32_t key);
     void handleInputPageMappedKey(uint32_t key);
     void handlePlotPageMappedKey(uint32_t key);
     void handleTablePageMappedKey(uint32_t key);
     void openPageMenu();
+    static void onPlotTouchEvent(lv_event_t *e);
 
     ServiceHub &services_;
 
@@ -159,6 +159,20 @@ private:
     bool region_zoom_active_ = false;
     bool region_zoom_anchor_set_ = false;
     int region_zoom_anchor_sample_ = 0;
+    bool plot_touch_dragging_ = false;
+    float plot_last_pinch_scale_ = 1.0f;
+    bool plot_touch_gesture_configured_ = false;
+    bool plot_touch_pending_ = false;
+    int plot_touch_dx_ = 0;
+    int plot_touch_dy_ = 0;
+    float plot_touch_start_x_min_ = -6.0f;
+    float plot_touch_start_x_max_ = 6.0f;
+    float plot_touch_start_y_min_ = -4.0f;
+    float plot_touch_start_y_max_ = 4.0f;
+    float plot_touch_pending_x_min_ = -6.0f;
+    float plot_touch_pending_x_max_ = 6.0f;
+    float plot_touch_pending_y_min_ = -4.0f;
+    float plot_touch_pending_y_max_ = 4.0f;
 
     float plot_x_min_ = -6.0f;
     float plot_x_max_ = 6.0f;
@@ -221,7 +235,6 @@ private:
     std::array<char, 128> entry_title_buf_{};
     std::array<char, 128> entry_prev_buf_{};
 
-    uint64_t prev_mask_ = 0;
     bool session_loaded_ = false;
     bool ui_ready_ = false;
 

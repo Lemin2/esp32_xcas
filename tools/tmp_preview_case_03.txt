@@ -1,0 +1,1 @@
+[[1/(x+1),sqrt((1+x^2)/(1-x)),((a+b)/(c+d))],[sum(k,k,1,n),x^2,((m+n)/(p+q))],[limit((sin(x))/x,x,0),sqrt((u+v)/(w-z)),((r+s)*(t+u))]]

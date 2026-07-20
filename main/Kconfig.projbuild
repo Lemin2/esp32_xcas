@@ -1,4 +1,46 @@
-menu "Example Configuration"
+menu "XCAS Configuration"
+
+    choice XCAS_BOARD
+        prompt "Target development board"
+        default XCAS_BOARD_CARDPUTER if IDF_TARGET_ESP32S3
+        default XCAS_BOARD_TAB5 if IDF_TARGET_ESP32P4
+        help
+            Select the board support package used by the GUI front-end.
+
+        config XCAS_BOARD_CARDPUTER
+            bool "M5Stack Cardputer"
+            depends on IDF_TARGET_ESP32S3
+            help
+                Use the in-tree Cardputer display and physical keyboard BSP.
+
+        config XCAS_BOARD_TAB5
+            bool "M5Stack Tab5"
+            depends on IDF_TARGET_ESP32P4
+            help
+                Use the ESP Component Registry M5Stack Tab5 BSP. Tab5 is a touch-only
+                ESP32-P4 board with a high-resolution 5 inch display.
+    endchoice
+
+    config XCAS_USE_SCREEN_KEYBOARD
+        bool "Enable on-screen keyboard"
+        default y if XCAS_BOARD_TAB5
+        default n if XCAS_BOARD_CARDPUTER
+        help
+            Enables an LVGL on-screen keyboard with normal and math layouts.
+
+    config XCAS_HAS_PHYSICAL_KEYBOARD
+        bool "Enable physical keyboard input"
+        default y if XCAS_BOARD_CARDPUTER
+        default n if XCAS_BOARD_TAB5
+        help
+            Enables board physical keyboard scanning and mapped-key dispatch.
+
+    config XCAS_ENABLE_USB_HID_INPUT
+        bool "Enable USB HID keyboard input"
+        default n
+        depends on XCAS_BOARD_TAB5
+        help
+            Enables USB HID input support on boards with USB host capability.
 
     config XCAS_ENABLE_WIFI
         bool "Enable WiFi support in GUI settings"

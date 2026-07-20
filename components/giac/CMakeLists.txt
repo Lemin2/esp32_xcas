@@ -80,11 +80,14 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     -fno-threadsafe-statics
     -fno-strict-aliasing
     -fno-exceptions
-    -mauto-litpools
     -Os
     -Wno-error
     -Wno-error=unknown-pragmas
 )
+
+if(CONFIG_IDF_TARGET_ARCH_XTENSA)
+    target_compile_options(${COMPONENT_LIB} PRIVATE -mauto-litpools)
+endif()
 
 # A handful of files have try/catch blocks not guarded by NO_STDEXCEPT.
 # Compile just those with exceptions enabled (their own unwind tables are

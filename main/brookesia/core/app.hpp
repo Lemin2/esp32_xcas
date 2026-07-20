@@ -14,7 +14,8 @@ public:
     virtual void releaseUi() {}
     virtual void onSuspend() {}
     virtual bool handleMenuButton() { return false; }
-    virtual void handleKeyboardState(uint64_t pressedMask) = 0;
+    virtual bool handleKeyboardToggle() { return false; }
+    virtual void handleKeyboardState(uint64_t pressedMask) { (void)pressedMask; }
     virtual void handleMappedKey(uint32_t key) { (void)key; }
     virtual void render() = 0;
 };

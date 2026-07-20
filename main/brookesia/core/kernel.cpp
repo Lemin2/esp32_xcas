@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <vector>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -63,6 +64,11 @@ void animHideComplete(lv_anim_t *a)
     lv_obj_set_style_translate_y(obj, 0, LV_PART_MAIN);
 }
 
+bool isCalcRoute(Route route)
+{
+    return route == Route::Calc;
+}
+
 bool wifiConnected()
 {
 #if CONFIG_XCAS_ENABLE_WIFI
@@ -103,6 +109,36 @@ bool Kernel::start()
 uint64_t Kernel::scanKeyboardState()
 {
     return board_.scanKeyboardState();
+}
+
+void Kernel::updateKeyboard()
+{
+    board_.updateKeyboard();
+}
+
+uint64_t Kernel::keyboardState() const
+{
+    return board_.keyboardState();
+}
+
+bool Kernel::fnActive() const
+{
+    return board_.fnActive();
+}
+
+bool Kernel::shiftActive() const
+{
+    return board_.shiftActive();
+}
+
+bool Kernel::popMappedKey(uint32_t &key)
+{
+    return board_.popMappedKey(key);
+}
+
+void Kernel::pushMappedKey(uint32_t key)
+{
+    board_.pushMappedKey(key);
 }
 
 void Kernel::setModifierState(bool fnActive, bool shiftActive)
@@ -186,7 +222,7 @@ void Kernel::debugSubmitFormula(const char *formula)
         switchTo(Route::Calc);
     }
 
-    auto *calc = dynamic_cast<CalcApp *>(apps_[static_cast<size_t>(Route::Calc)].get());
+    auto *calc = static_cast<CalcApp *>(apps_[static_cast<size_t>(Route::Calc)].get());
     if (calc == nullptr) {
         return;
     }
@@ -203,7 +239,7 @@ void Kernel::debugEmitFormulaImage(const char *formula)
         switchTo(Route::Calc);
     }
 
-    auto *calc = dynamic_cast<CalcApp *>(apps_[static_cast<size_t>(Route::Calc)].get());
+    auto *calc = static_cast<CalcApp *>(apps_[static_cast<size_t>(Route::Calc)].get());
     if (calc == nullptr) {
         return;
     }
@@ -215,6 +251,16 @@ void Kernel::requestScreenshot()
     screenshot_pending_ = true;
 }
 
+bool Kernel::lockLvgl(uint32_t timeout_ms)
+{
+    return board_.lockLvgl(timeout_ms);
+}
+
+void Kernel::unlockLvgl()
+{
+    board_.unlockLvgl();
+}
+
 void Kernel::render()
 {
     auto &app = apps_[static_cast<size_t>(router_.current())];
@@ -224,12 +270,8 @@ void Kernel::render()
 
     ensureStatusBar();
     updateStatusBar();
-    if (status_bar_ != nullptr) {
-        lv_obj_move_foreground(status_bar_);
-    }
-    if (menu_open_ && menu_overlay_ != nullptr) {
-        lv_obj_move_foreground(menu_overlay_);
-    }
+    updateGlobalKeyboardBinding();
+    bringSystemChromeToFront();
 
     pumpLvgl();
 
@@ -249,6 +291,10 @@ void Kernel::render()
 
 void Kernel::pumpLvgl()
 {
+    if (board_.usesExternalLvglPort()) {
+        return;
+    }
+
     const uint64_t now_us = static_cast<uint64_t>(esp_timer_get_time());
     uint32_t elapsed_ms = 10;
     if (last_lvgl_tick_us_ != 0 && now_us > last_lvgl_tick_us_) {
@@ -273,12 +319,21 @@ void Kernel::ensureAppMenu()
         return;
     }
 
+    const bool touch = board_.hasTouchInput();
+    const lv_coord_t overlay_w = touch ? 540 : 230;
+    const lv_coord_t overlay_h = touch ? 270 : 122;
+    const lv_coord_t tile_w = touch ? 160 : 66;
+    const lv_coord_t tile_h = touch ? 108 : 50;
+
     menu_overlay_ = lv_obj_create(screen);
-    lv_obj_set_size(menu_overlay_, 230, 122);
+    lv_obj_set_size(menu_overlay_, overlay_w, overlay_h);
     lv_obj_align(menu_overlay_, LV_ALIGN_CENTER, 0, 7);
     ui_theme::applyMenuOverlay(menu_overlay_, LV_COLOR_MAKE(24, 30, 46), LV_COLOR_MAKE(24, 30, 46), 0);
     lv_obj_set_flex_flow(menu_overlay_, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(menu_overlay_, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_all(menu_overlay_, touch ? 12 : 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_row(menu_overlay_, touch ? 12 : 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_column(menu_overlay_, touch ? 12 : 0, LV_PART_MAIN);
     lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_SCROLLABLE);
 
     menu_group_ = lv_group_create();
@@ -296,10 +351,10 @@ void Kernel::ensureAppMenu()
         const uint8_t blue = static_cast<uint8_t>(rgb & 0xFFU);
         const lv_color_t tile_color = LV_COLOR_MAKE(red, green, blue);
 
-        lv_obj_t *tile = lv_obj_create(menu_overlay_);
+        lv_obj_t *tile = lv_button_create(menu_overlay_);
         lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(tile, &Kernel::appMenuTileEventCb, LV_EVENT_ALL, this);
-        lv_obj_set_size(tile, 66, 50);
+        lv_obj_set_size(tile, tile_w, tile_h);
         lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
         ui_theme::applyMenuTile(tile, tile_color);
         lv_obj_set_flex_flow(tile, LV_FLEX_FLOW_COLUMN);
@@ -320,11 +375,13 @@ void Kernel::ensureAppMenu()
         lv_obj_set_style_transition(tile, &trans_dsc, LV_PART_MAIN);
 
         lv_obj_t *icon = lv_label_create(tile);
+        lv_obj_add_flag(icon, LV_OBJ_FLAG_EVENT_BUBBLE);
         ui_theme::applyText14(icon);
         lv_obj_set_style_text_color(icon, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
         lv_label_set_text(icon, kIcons[i]);
 
         lv_obj_t *name = lv_label_create(tile);
+        lv_obj_add_flag(name, LV_OBJ_FLAG_EVENT_BUBBLE);
         ui_theme::applyText14(name);
         lv_obj_set_style_text_color(name, LV_COLOR_MAKE(236, 240, 248), LV_PART_MAIN);
         lv_label_set_text(name, kNames[i]);
@@ -343,7 +400,7 @@ void Kernel::appMenuTileEventCb(lv_event_t *e)
         return;
     }
 
-    const int index = self->appMenuIndexForTile(lv_event_get_target_obj(e));
+    const int index = self->appMenuIndexForTile(lv_event_get_current_target_obj(e));
     if (index < 0) {
         return;
     }
@@ -351,7 +408,10 @@ void Kernel::appMenuTileEventCb(lv_event_t *e)
     if (code == LV_EVENT_FOCUSED) {
         self->menu_index_ = index;
         self->updateAppMenu();
-    } else if (code == LV_EVENT_CLICKED) {
+    } else if (code == LV_EVENT_PRESSED) {
+        self->menu_index_ = index;
+        self->updateAppMenu();
+    } else if (code == LV_EVENT_CLICKED || code == LV_EVENT_SHORT_CLICKED) {
         self->switchTo(static_cast<Route>(index));
         self->menu_open_ = false;
         self->showAppMenu(false);
@@ -385,6 +445,17 @@ void Kernel::showAppMenu(bool show)
         lv_anim_delete(menu_overlay_, nullptr);
         lv_obj_clear_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(menu_overlay_);
+        if (board_.hasTouchInput()) {
+            lv_obj_set_style_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_translate_y(menu_overlay_, 0, LV_PART_MAIN);
+            updateAppMenu();
+            if (menu_group_ != nullptr) {
+                lv_group_set_default(menu_group_);
+                lv_group_focus_obj(menu_items_[menu_index_]);
+            }
+            return;
+        }
+
         lv_obj_set_style_opa(menu_overlay_, LV_OPA_0, LV_PART_MAIN);
         lv_obj_set_style_translate_y(menu_overlay_, 6, LV_PART_MAIN);
 
@@ -413,6 +484,12 @@ void Kernel::showAppMenu(bool show)
         }
     } else {
         lv_anim_delete(menu_overlay_, nullptr);
+        if (board_.hasTouchInput()) {
+            lv_obj_add_flag(menu_overlay_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_style_opa(menu_overlay_, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_translate_y(menu_overlay_, 0, LV_PART_MAIN);
+            return;
+        }
 
         lv_anim_t fade_out;
         lv_anim_init(&fade_out);
@@ -571,14 +648,54 @@ void Kernel::ensureStatusBar()
     }
 
     status_bar_ = lv_obj_create(screen);
-    lv_obj_set_size(status_bar_, board::CardputerBsp::kDisplayWidth, 16);
+    lv_obj_set_size(status_bar_, board_.displayWidth(), board_.statusBarHeight());
     lv_obj_align(status_bar_, LV_ALIGN_TOP_MID, 0, 0);
     ui_theme::applyPanel(status_bar_, LV_COLOR_MAKE(22, 30, 46), LV_COLOR_MAKE(22, 30, 46), 0, 4, 0, 0);
+
+    if (board_.hasTouchInput()) {
+        const lv_coord_t button_size = static_cast<lv_coord_t>(std::max(56, board_.statusBarHeight() - 8));
+        const lv_coord_t gap = 4;
+
+        status_launcher_btn_ = lv_button_create(status_bar_);
+        lv_obj_set_size(status_launcher_btn_, button_size, button_size);
+        lv_obj_align(status_launcher_btn_, LV_ALIGN_LEFT_MID, 2, 0);
+        lv_obj_add_event_cb(status_launcher_btn_, &Kernel::statusLauncherEventCb, LV_EVENT_CLICKED, this);
+        lv_obj_t *launcher_icon = lv_label_create(status_launcher_btn_);
+        ui_theme::applyText14(launcher_icon);
+        lv_obj_set_style_text_font(launcher_icon, ui_theme::textFont16(), LV_PART_MAIN);
+        lv_obj_set_style_text_color(launcher_icon, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
+        lv_label_set_text(launcher_icon, LV_SYMBOL_HOME);
+        lv_obj_center(launcher_icon);
+
+        status_app_menu_btn_ = lv_button_create(status_bar_);
+        lv_obj_set_size(status_app_menu_btn_, button_size, button_size);
+        lv_obj_align(status_app_menu_btn_, LV_ALIGN_LEFT_MID, 2 + button_size + gap, 0);
+        lv_obj_add_event_cb(status_app_menu_btn_, &Kernel::statusAppMenuEventCb, LV_EVENT_CLICKED, this);
+        lv_obj_t *app_menu_icon = lv_label_create(status_app_menu_btn_);
+        ui_theme::applyText14(app_menu_icon);
+        lv_obj_set_style_text_font(app_menu_icon, ui_theme::textFont16(), LV_PART_MAIN);
+        lv_obj_set_style_text_color(app_menu_icon, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
+        lv_label_set_text(app_menu_icon, LV_SYMBOL_LIST);
+        lv_obj_center(app_menu_icon);
+
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+        status_keyboard_btn_ = lv_button_create(status_bar_);
+        lv_obj_set_size(status_keyboard_btn_, button_size, button_size);
+        lv_obj_align(status_keyboard_btn_, LV_ALIGN_LEFT_MID, 2 + (button_size + gap) * 2, 0);
+        lv_obj_add_event_cb(status_keyboard_btn_, &Kernel::statusKeyboardEventCb, LV_EVENT_CLICKED, this);
+        lv_obj_t *keyboard_icon = lv_label_create(status_keyboard_btn_);
+        ui_theme::applyText14(keyboard_icon);
+        lv_obj_set_style_text_font(keyboard_icon, ui_theme::textFont16(), LV_PART_MAIN);
+        lv_obj_set_style_text_color(keyboard_icon, LV_COLOR_MAKE(255, 255, 255), LV_PART_MAIN);
+        lv_label_set_text(keyboard_icon, LV_SYMBOL_KEYBOARD);
+        lv_obj_center(keyboard_icon);
+#endif
+    }
 
     status_left_ = lv_label_create(status_bar_);
     ui_theme::applyText14(status_left_);
     lv_obj_set_style_text_color(status_left_, LV_COLOR_MAKE(240, 244, 252), LV_PART_MAIN);
-    lv_obj_align(status_left_, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_align(status_left_, LV_ALIGN_LEFT_MID, board_.hasTouchInput() ? 184 : 0, 0);
 
     status_center_ = lv_label_create(status_bar_);
     ui_theme::applyText14(status_center_);
@@ -660,22 +777,209 @@ void Kernel::updateStatusBar()
     lv_label_set_text(status_left_, left);
     lv_label_set_text(status_center_, center);
     lv_label_set_text(status_right_, right);
+
+}
+
+void Kernel::ensureGlobalKeyboard()
+{
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+    if (global_keyboard_ != nullptr || !board_.hasTouchInput()) {
+        return;
+    }
+
+    lv_obj_t *screen = lv_screen_active();
+    if (screen == nullptr) {
+        return;
+    }
+
+    global_keyboard_ = lv_keyboard_create(screen);
+    const lv_coord_t keyboard_h = static_cast<lv_coord_t>(std::max(260, board_.displayHeight() / 3));
+    lv_obj_set_size(global_keyboard_, board_.displayWidth(), keyboard_h);
+    lv_obj_align(global_keyboard_, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_text_font(global_keyboard_, ui_theme::textFont16(), LV_PART_ITEMS);
+    lv_obj_add_event_cb(global_keyboard_, &Kernel::globalKeyboardEventCb, LV_EVENT_READY, this);
+    lv_obj_add_event_cb(global_keyboard_, &Kernel::globalKeyboardEventCb, LV_EVENT_CANCEL, this);
+    lv_obj_add_flag(global_keyboard_, LV_OBJ_FLAG_HIDDEN);
+#endif
+}
+
+bool Kernel::isObjectVisible(lv_obj_t *obj) const
+{
+    while (obj != nullptr) {
+        if (lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN)) {
+            return false;
+        }
+        obj = lv_obj_get_parent(obj);
+    }
+    return true;
+}
+
+lv_obj_t *Kernel::findFocusedTextarea(lv_obj_t *root) const
+{
+    if (root == nullptr || !isObjectVisible(root)) {
+        return nullptr;
+    }
+    if (lv_obj_check_type(root, &lv_textarea_class) && lv_obj_has_state(root, LV_STATE_FOCUSED)) {
+        return root;
+    }
+    const uint32_t child_count = lv_obj_get_child_count(root);
+    for (uint32_t i = 0; i < child_count; ++i) {
+        if (lv_obj_t *found = findFocusedTextarea(lv_obj_get_child(root, i)); found != nullptr) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+void Kernel::updateGlobalKeyboardBinding()
+{
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+    if (!board_.hasTouchInput() || isCalcRoute(router_.current())) {
+        return;
+    }
+
+    lv_obj_t *textarea = findFocusedTextarea(lv_screen_active());
+    if (textarea == nullptr) {
+        if (global_keyboard_ != nullptr) {
+            lv_keyboard_set_textarea(global_keyboard_, nullptr);
+        }
+        return;
+    }
+
+    ensureGlobalKeyboard();
+    if (global_keyboard_ == nullptr) {
+        return;
+    }
+    lv_keyboard_set_textarea(global_keyboard_, textarea);
+    if (!global_keyboard_visible_) {
+        global_keyboard_visible_ = true;
+        lv_obj_clear_flag(global_keyboard_, LV_OBJ_FLAG_HIDDEN);
+    }
+    lv_obj_move_foreground(global_keyboard_);
+#endif
+}
+
+void Kernel::bringSystemChromeToFront()
+{
+    if (status_bar_ != nullptr) {
+        lv_obj_move_foreground(status_bar_);
+    }
+    if (menu_open_ && menu_overlay_ != nullptr) {
+        lv_obj_move_foreground(menu_overlay_);
+    }
+}
+
+void Kernel::statusLauncherEventCb(lv_event_t *e)
+{
+    auto *self = static_cast<Kernel *>(lv_event_get_user_data(e));
+    if (self == nullptr) {
+        return;
+    }
+
+    self->menu_open_ = !self->menu_open_;
+    if (self->menu_open_) {
+        self->menu_index_ = static_cast<int>(self->router_.current());
+    }
+    self->showAppMenu(self->menu_open_);
+    self->bringSystemChromeToFront();
+}
+
+void Kernel::statusAppMenuEventCb(lv_event_t *e)
+{
+    auto *self = static_cast<Kernel *>(lv_event_get_user_data(e));
+    if (self == nullptr) {
+        return;
+    }
+
+    auto &app = self->apps_[static_cast<size_t>(self->router_.current())];
+    if (app && app->handleMenuButton()) {
+        if (self->menu_open_) {
+            self->menu_open_ = false;
+            self->showAppMenu(false);
+        }
+        self->bringSystemChromeToFront();
+        return;
+    }
+
+    self->menu_open_ = !self->menu_open_;
+    if (self->menu_open_) {
+        self->menu_index_ = static_cast<int>(self->router_.current());
+    }
+    self->showAppMenu(self->menu_open_);
+    self->bringSystemChromeToFront();
+}
+
+void Kernel::statusKeyboardEventCb(lv_event_t *e)
+{
+    auto *self = static_cast<Kernel *>(lv_event_get_user_data(e));
+    if (self == nullptr) {
+        return;
+    }
+
+    auto &app = self->apps_[static_cast<size_t>(self->router_.current())];
+    if (app) {
+        if (app->handleKeyboardToggle()) {
+            self->bringSystemChromeToFront();
+            return;
+        }
+    }
+
+#if CONFIG_XCAS_USE_SCREEN_KEYBOARD
+    self->ensureGlobalKeyboard();
+    if (self->global_keyboard_ != nullptr) {
+        self->global_keyboard_visible_ = !self->global_keyboard_visible_;
+        if (self->global_keyboard_visible_) {
+            lv_obj_clear_flag(self->global_keyboard_, LV_OBJ_FLAG_HIDDEN);
+            self->updateGlobalKeyboardBinding();
+            lv_obj_move_foreground(self->global_keyboard_);
+        } else {
+            lv_obj_add_flag(self->global_keyboard_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#endif
+    self->bringSystemChromeToFront();
+}
+
+void Kernel::globalKeyboardEventCb(lv_event_t *e)
+{
+    auto *self = static_cast<Kernel *>(lv_event_get_user_data(e));
+    if (self == nullptr) {
+        return;
+    }
+    const lv_event_code_t code = lv_event_get_code(e);
+    auto &app = self->apps_[static_cast<size_t>(self->router_.current())];
+    if (app) {
+        app->handleMappedKey(code == LV_EVENT_READY ? LV_KEY_ENTER : LV_KEY_ESC);
+    }
+    if (self->global_keyboard_ != nullptr) {
+        self->global_keyboard_visible_ = false;
+        lv_obj_add_flag(self->global_keyboard_, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void Kernel::drawBootSplash()
 {
-    std::array<uint16_t, board::CardputerBsp::kDisplayWidth> line{};
-    for (int y = 0; y < board::CardputerBsp::kDisplayHeight; ++y) {
+    if (board_.usesExternalLvglPort()) {
+        lv_obj_t *screen = lv_screen_active();
+        if (screen != nullptr) {
+            ui_theme::applyPage(screen, LV_COLOR_MAKE(20, 20, 20));
+        }
+        ESP_LOGI(kTag, "boot splash skipped; external LVGL port active");
+        return;
+    }
+
+    std::vector<uint16_t> line(static_cast<size_t>(board_.displayWidth()));
+    for (int y = 0; y < board_.displayHeight(); ++y) {
         uint16_t color = rgb565(20, 20, 20);
-        if (y < board::CardputerBsp::kDisplayHeight / 3) {
+        if (y < board_.displayHeight() / 3) {
             color = rgb565(220, 40, 40);
-        } else if (y < (board::CardputerBsp::kDisplayHeight * 2) / 3) {
+        } else if (y < (board_.displayHeight() * 2) / 3) {
             color = rgb565(40, 190, 70);
         } else {
             color = rgb565(40, 110, 220);
         }
-        line.fill(color);
-        board_.presentArea(0, y, board::CardputerBsp::kDisplayWidth, y + 1, line.data());
+        std::fill(line.begin(), line.end(), color);
+        board_.presentArea(0, y, board_.displayWidth(), y + 1, line.data());
     }
     ESP_LOGI(kTag, "boot splash rendered");
 }

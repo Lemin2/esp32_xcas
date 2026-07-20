@@ -34,7 +34,7 @@ bool hasSuffix(const char *s, const char *suffix)
 
 } // namespace
 
-ProjectApp::ProjectApp(ServiceHub &services) : cas_(services.casService())
+ProjectApp::ProjectApp(ServiceHub &services) : services_(services), cas_(services.casService())
 {
 }
 
@@ -54,15 +54,17 @@ void ProjectApp::ensureUi()
         return;
     }
 
-    const lv_coord_t w = static_cast<lv_coord_t>(board::CardputerBsp::kDisplayWidth);
-    const lv_coord_t h = static_cast<lv_coord_t>(board::CardputerBsp::kDisplayHeight);
+    const lv_coord_t w = static_cast<lv_coord_t>(services_.board().displayWidth());
+    const lv_coord_t h = static_cast<lv_coord_t>(services_.board().displayHeight());
+    const lv_coord_t status_h = static_cast<lv_coord_t>(services_.board().statusBarHeight());
+    const bool touch = services_.board().hasTouchInput();
 
     root_ = lv_obj_create(screen);
     lv_obj_remove_style_all(root_);
-    lv_obj_set_size(root_, w, h - 16);
-    lv_obj_align(root_, LV_ALIGN_TOP_LEFT, 0, 16);
+    lv_obj_set_size(root_, w, h - status_h);
+    lv_obj_align(root_, LV_ALIGN_TOP_LEFT, 0, status_h);
     ui_theme::applyPage(root_, LV_COLOR_MAKE(245, 245, 238));
-    lv_obj_set_style_pad_all(root_, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(root_, touch ? 10 : 4, LV_PART_MAIN);
     lv_obj_clear_flag(root_, LV_OBJ_FLAG_SCROLLABLE);
 
     menu_ = lv_menu_create(root_);
@@ -83,7 +85,7 @@ void ProjectApp::ensureUi()
     lv_obj_add_flag(editor_panel_, LV_OBJ_FLAG_HIDDEN);
 
     editor_box_ = lv_textarea_create(editor_panel_);
-    lv_obj_set_size(editor_box_, w - 8, h - 24);
+    lv_obj_set_size(editor_box_, w - (touch ? 20 : 8), h - status_h - (touch ? 20 : 8));
     lv_obj_align(editor_box_, LV_ALIGN_TOP_MID, 0, 0);
     lv_textarea_set_max_length(editor_box_, kMaxScriptBytes);
     ui_theme::applyText14(editor_box_);
@@ -92,7 +94,7 @@ void ProjectApp::ensureUi()
     lv_obj_set_style_bg_opa(editor_box_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_color(editor_box_, LV_COLOR_MAKE(210, 216, 226), LV_PART_MAIN);
     lv_obj_set_style_border_width(editor_box_, 1, LV_PART_MAIN);
-    lv_obj_set_style_pad_all(editor_box_, 4, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(editor_box_, touch ? 10 : 4, LV_PART_MAIN);
     lv_obj_set_style_bg_color(editor_box_, LV_COLOR_MAKE(34, 92, 180), LV_PART_CURSOR | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(editor_box_, LV_OPA_COVER, LV_PART_CURSOR | LV_STATE_DEFAULT);
     lv_obj_add_state(editor_box_, LV_STATE_FOCUSED);
@@ -168,8 +170,9 @@ void ProjectApp::rebuildMenu()
     lv_obj_clean(menu_page_);
     menu_entries_.clear();
     suppress_menu_events_ = false;
+    const bool touch = services_.board().hasTouchInput();
 
-    auto add = [this](Action action, int program_index, const char *name, const char *value, bool disabled) {
+    auto add = [this, touch](Action action, int program_index, const char *name, const char *value, bool disabled) {
         MenuEntry entry;
         entry.action = action;
         entry.program_index = program_index;
@@ -177,20 +180,22 @@ void ProjectApp::rebuildMenu()
         entry.row = lv_menu_cont_create(menu_page_);
         lv_obj_add_flag(entry.row, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(entry.row, &ProjectApp::menuEntryEventCb, LV_EVENT_ALL, this);
-        lv_obj_set_height(entry.row, 23);
+        lv_obj_set_height(entry.row, touch ? 52 : 23);
         lv_obj_set_width(entry.row, lv_pct(100));
         lv_obj_set_flex_flow(entry.row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(entry.row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
                               LV_FLEX_ALIGN_CENTER);
-        ui_theme::applyRowCard(entry.row, LV_COLOR_MAKE(208, 214, 224), 4, 6, 6);
+        ui_theme::applyRowCard(entry.row, LV_COLOR_MAKE(208, 214, 224), touch ? 8 : 4, touch ? 12 : 6, touch ? 12 : 6);
         entry.name = lv_label_create(entry.row);
+        lv_obj_add_flag(entry.name, LV_OBJ_FLAG_EVENT_BUBBLE);
         ui_theme::applyText14(entry.name);
         lv_label_set_text(entry.name, name);
         lv_obj_set_flex_grow(entry.name, 1);
         entry.value = lv_label_create(entry.row);
+        lv_obj_add_flag(entry.value, LV_OBJ_FLAG_EVENT_BUBBLE);
         ui_theme::applyText14(entry.value);
         lv_label_set_text(entry.value, value == nullptr ? "" : value);
-        lv_obj_set_style_max_width(entry.value, 72, LV_PART_MAIN);
+        lv_obj_set_style_max_width(entry.value, touch ? 180 : 72, LV_PART_MAIN);
         menu_entries_.push_back(entry);
     };
 
@@ -500,11 +505,6 @@ void ProjectApp::releaseUi()
     suppress_menu_events_ = false;
     mode_ = Mode::Menu;
     ui_ready_ = false;
-}
-
-void ProjectApp::handleKeyboardState(uint64_t pressedMask)
-{
-    prev_mask_ = pressedMask;
 }
 
 bool ProjectApp::handleMenuButton()

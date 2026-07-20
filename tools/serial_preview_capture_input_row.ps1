@@ -1,9 +1,9 @@
 param(
-    [string]$Port = "COM7",
+    [string]$Port = "COM13",
     [int]$Baud = 460800,
     [string]$FormulasFile = "tools/tmp_preview_stress_cases.txt",
     [string]$OutDir = "captures/ui_preview_stress_large_matrix_sqrt_nested_v2",
-    [int]$SubmitWaitMs = 600,
+    [int]$SubmitWaitMs = 6000,
     [int]$ShotTimeoutMs = 30000
 )
 
